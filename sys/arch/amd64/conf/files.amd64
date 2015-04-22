@@ -141,6 +141,7 @@ file	arch/amd64/amd64/netbsd32_sigcode.S	compat_netbsd32 & compat_16
 file	arch/amd64/amd64/netbsd32_syscall.c	compat_netbsd32
 
 # CloudABI compatibility (COMPAT_CLOUDABI64)
+include "compat/cloudabi/files.cloudabi"
 include "compat/cloudabi64/files.cloudabi64"
 
 # Linux compatibility (COMPAT_LINUX)

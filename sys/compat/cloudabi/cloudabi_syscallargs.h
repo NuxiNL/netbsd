@@ -25,21 +25,10 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _CLOUDABI64_SYSCALLDEFS_H_
-#define	_CLOUDABI64_SYSCALLDEFS_H_
-
-#include <sys/types.h>
-
-#include <compat/cloudabi/cloudabi_syscalldefs.h>
-
-typedef uint64_t cloudabi64_size_t;
-typedef uint64_t cloudabi64_uintptr_t;
-
-/* Import machine-dependent CloudABI definitions for 64-bit systems. */
-#define	IDENT(ident)	cloudabi64_##ident
-#define	PTR(type)	cloudabi64_uintptr_t
-#include <external/bsd/cloudabi/syscalldefs_md.h>
-#undef IDENT
-#undef PTR
-
-#endif
+/*
+ * This should provide all prototypes for the machine-independent system
+ * calls. Unfortunately, we don't have a separate system call table for
+ * those, so rely on the system call table from COMPAT_CLOUDABI64.
+ */
+#include <compat/cloudabi64/cloudabi64_syscalldefs.h>
+#include <compat/cloudabi64/cloudabi64_syscallargs.h>

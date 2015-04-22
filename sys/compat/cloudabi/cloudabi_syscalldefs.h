@@ -1,3 +1,5 @@
+/*	$NetBSD$	*/
+
 /*-
  * Copyright (c) 2015 Nuxi, https://nuxi.nl/
  *
@@ -21,14 +23,14 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * $NetBSD$
  */
 
 #ifndef _CLOUDABI_SYSCALLDEFS_H_
 #define	_CLOUDABI_SYSCALLDEFS_H_
 
 #include <sys/types.h>
+
+#include <lib/libkern/libkern.h>
 
 #define	alignas		_Alignas
 #define	alignof		_Alignof
