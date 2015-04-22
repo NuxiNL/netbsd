@@ -1,0 +1,7 @@
+#	$NetBSD$
+#
+# Config file description for 64-bit CloudABI compat code.
+
+define	compat_cloudabi64
+file	compat/cloudabi64/cloudabi64_syscalls.c	compat_cloudabi64
+file	compat/cloudabi64/cloudabi64_sysent.c	compat_cloudabi64
