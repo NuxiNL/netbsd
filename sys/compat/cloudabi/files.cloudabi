@@ -4,6 +4,7 @@
 
 define	compat_cloudabi64
 file	compat/cloudabi/cloudabi_clock.c	compat_cloudabi64
+file	compat/cloudabi/cloudabi_errno.c	compat_cloudabi64
 file	compat/cloudabi/cloudabi_fd.c		compat_cloudabi64
 file	compat/cloudabi/cloudabi_file.c		compat_cloudabi64
 file	compat/cloudabi/cloudabi_futex.c	compat_cloudabi64
