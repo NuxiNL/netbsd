@@ -133,7 +133,7 @@ static struct emul cloudabi64_emul = {
 	.e_syscallnames		= NULL,
 #endif
 	.e_sendsig		= NULL,
-	.e_trapsignal		= NULL,
+	.e_trapsignal		= trapsignal,
 	.e_tracesig		= NULL,
 	.e_sigcode		= NULL,
 	.e_esigcode		= NULL,
