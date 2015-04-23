@@ -27,6 +27,8 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/fcntl.h>
+#include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
@@ -82,8 +84,26 @@ int
 cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
     register_t *retval)
 {
+	struct sys_lseek_args sys_lseek_args;
 
-	return (ENOSYS);
+	SCARG(&sys_lseek_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_lseek_args, offset) = SCARG(uap, offset);
+
+	switch (SCARG(uap, whence)) {
+	case CLOUDABI_WHENCE_CUR:
+		SCARG(&sys_lseek_args, whence) = SEEK_CUR;
+		break;
+	case CLOUDABI_WHENCE_END:
+		SCARG(&sys_lseek_args, whence) = SEEK_END;
+		break;
+	case CLOUDABI_WHENCE_SET:
+		SCARG(&sys_lseek_args, whence) = SEEK_SET;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	return (sys_lseek(l, &sys_lseek_args, retval));
 }
 
 int
