@@ -28,6 +28,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/proc.h>
+#include <sys/syscallargs.h>
 #include <sys/wait.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
@@ -36,9 +37,10 @@ int
 cloudabi_sys_proc_exit(struct lwp *l,
     const struct cloudabi_sys_proc_exit_args *uap, register_t *retval)
 {
+	struct sys_exit_args sys_exit_args;
 
-	exit1(l, W_EXITCODE(SCARG(uap, rval), 0));
-	/* NOTREACHED */
+	SCARG(&sys_exit_args, rval) = SCARG(uap, rval);
+	return sys_exit(l, &sys_exit_args, retval);
 }
 
 int
