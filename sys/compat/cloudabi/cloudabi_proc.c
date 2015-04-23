@@ -33,6 +33,49 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
+/* Converts CloudABI's signal numbers to NetBSD's. */
+static int
+convert_signal(cloudabi_signal_t in, int *out)
+{
+	static const int signals[] = {
+		[CLOUDABI_SIGABRT] = SIGABRT,
+		[CLOUDABI_SIGALRM] = SIGALRM,
+		[CLOUDABI_SIGBUS] = SIGBUS,
+		[CLOUDABI_SIGCHLD] = SIGCHLD,
+		[CLOUDABI_SIGCONT] = SIGCONT,
+		[CLOUDABI_SIGFPE] = SIGFPE,
+		[CLOUDABI_SIGHUP] = SIGHUP,
+		[CLOUDABI_SIGILL] = SIGILL,
+		[CLOUDABI_SIGINT] = SIGINT,
+		[CLOUDABI_SIGKILL] = SIGKILL,
+		[CLOUDABI_SIGPIPE] = SIGPIPE,
+		[CLOUDABI_SIGQUIT] = SIGQUIT,
+		[CLOUDABI_SIGSEGV] = SIGSEGV,
+		[CLOUDABI_SIGSTOP] = SIGSTOP,
+		[CLOUDABI_SIGSYS] = SIGSYS,
+		[CLOUDABI_SIGTERM] = SIGTERM,
+		[CLOUDABI_SIGTRAP] = SIGTRAP,
+		[CLOUDABI_SIGTSTP] = SIGTSTP,
+		[CLOUDABI_SIGTTIN] = SIGTTIN,
+		[CLOUDABI_SIGTTOU] = SIGTTOU,
+		[CLOUDABI_SIGURG] = SIGURG,
+		[CLOUDABI_SIGUSR1] = SIGUSR1,
+		[CLOUDABI_SIGUSR2] = SIGUSR2,
+		[CLOUDABI_SIGVTALRM] = SIGVTALRM,
+		[CLOUDABI_SIGXCPU] = SIGXCPU,
+		[CLOUDABI_SIGXFSZ] = SIGXFSZ,
+	};
+
+	if ((in < __arraycount(signals) && signals[in] != 0) || in == 0) {
+		/* Valid signal mapping. */
+		*out = signals[in];
+		return (0);
+	} else {
+		/* Invalid signal. */
+		return (EINVAL);
+	}
+}
+
 int
 cloudabi_sys_proc_exit(struct lwp *l,
     const struct cloudabi_sys_proc_exit_args *uap, register_t *retval)
@@ -54,6 +97,14 @@ int
 cloudabi_sys_proc_raise(struct lwp *l,
     const struct cloudabi_sys_proc_raise_args *uap, register_t *retval)
 {
+	struct sys_kill_args sys_kill_args;
+	int error;
 
-	return (ENOSYS);
+	SCARG(&sys_kill_args, pid) = l->l_proc->p_pid;
+	error = convert_signal(SCARG(uap, sig), &SCARG(&sys_kill_args, signum));
+	if (error != 0)
+		return (error);
+
+	/* TODO(ed): Set signal action back to default. */
+	return (sys_kill(l, &sys_kill_args, retval));
 }
