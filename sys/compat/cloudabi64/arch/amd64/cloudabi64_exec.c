@@ -31,6 +31,12 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/exec_elf.h>
 #include <sys/module.h>
 #include <sys/proc.h>
+#include <sys/syscallvar.h>
+
+#include <machine/userret.h>
+
+#include <compat/cloudabi/cloudabi_util.h>
+#include <compat/cloudabi64/cloudabi64_syscall.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -42,8 +48,56 @@ extern struct sysent cloudabi64_sysent[];
 static void
 cloudabi64_syscall(struct trapframe *frame)
 {
+	const struct sysent *callp;
+	struct proc *p;
+	struct lwp *l;
+	int error;
+	register_t *args, code, rval[2];
 
-	/* TODO(ed): Implement. */
+	l = curlwp;
+	p = l->l_proc;
+	LWP_CACHE_CREDS(l, p);
+
+	code = frame->tf_rax;
+	code &= CLOUDABI64_SYS_NSYSENT - 1;
+	callp = p->p_emul->e_sysent + code;
+
+	args = &frame->tf_rdi;
+	if (!__predict_false(p->p_trace_enabled || KDTRACE_ENTRY(callp->sy_entry))
+	    || (error = trace_enter(code, callp, args)) == 0) {
+		rval[0] = 0;
+		rval[1] = frame->tf_rdx;
+		error = sy_call(callp, l, args, rval);
+	}
+
+	switch (error) {
+	case 0:
+		frame->tf_rax = rval[0];
+		frame->tf_rdx = rval[1];
+		frame->tf_rflags &= ~PSL_C;	/* carry bit */
+		break;
+	case ERESTART:
+		/*
+		 * The offset to adjust the PC by depends on whether we entered
+		 * the kernel through the trap or call gate.  We pushed the
+		 * size of the instruction into tf_err on entry.
+		 */
+		frame->tf_rip -= frame->tf_err;
+		break;
+	case EJUSTRETURN:
+		/* Nothing to do. */
+		break;
+	default:
+		error = cloudabi_convert_errno(error);
+		frame->tf_rax = cloudabi_convert_errno(error);
+		frame->tf_rflags |= PSL_C;	/* carry bit */
+		break;
+	}
+
+	if (__predict_false(p->p_trace_enabled || KDTRACE_ENTRY(callp->sy_return)))
+		trace_exit(code, callp, args, rval, error);
+
+	userret(l);
 }
 
 static void
