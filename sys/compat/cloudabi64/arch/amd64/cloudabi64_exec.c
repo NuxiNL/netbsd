@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <compat/cloudabi/cloudabi_util.h>
 #include <compat/cloudabi64/cloudabi64_syscall.h>
+#include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -44,6 +45,23 @@ __KERNEL_RCSID(0, "$NetBSD$");
     sizeof(Elf64_Addr)) + MAXPATHLEN + ALIGN(1))
 
 extern struct sysent cloudabi64_sysent[];
+
+static void
+cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
+{
+	struct trapframe *tf;
+
+	/*
+	 * Set registers to initial values. The first argument should
+	 * point to the startup data structure. The second argument
+	 * should be set to its size, so crt0.c can zero pad the
+	 * structure if necessary.
+	 */
+	setregs(l, pack, stack);
+	tf = l->l_md.md_regs;
+	tf->tf_rdi = stack;
+	tf->tf_rsi = sizeof(cloudabi64_startup_data_t);
+}
 
 static void
 cloudabi64_syscall(struct trapframe *frame)
@@ -89,7 +107,7 @@ cloudabi64_syscall(struct trapframe *frame)
 		break;
 	default:
 		error = cloudabi_convert_errno(error);
-		frame->tf_rax = cloudabi_convert_errno(error);
+		frame->tf_rax = error;
 		frame->tf_rflags |= PSL_C;	/* carry bit */
 		break;
 	}
@@ -117,6 +135,15 @@ cloudabi64_elf_probe(struct lwp *l, struct exec_package *epp, void *veh,
 	return (eh->e_ident[EI_OSABI] == ELFOSABI_CLOUDABI ? 0 : ENOEXEC);
 }
 
+static int
+cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
+    struct ps_strings *arginfo, char **stackp, void *argp)
+{
+
+	/* TODO(ed): Customize this. */
+	return (elf64_copyargs(l, pack, arginfo, stackp, argp));
+}
+
 static struct emul cloudabi64_emul = {
 	.e_name			= "cloudabi64",
 	.e_path			= NULL,
@@ -138,7 +165,7 @@ static struct emul cloudabi64_emul = {
 	.e_sigcode		= NULL,
 	.e_esigcode		= NULL,
 	.e_sigobject		= NULL,
-	.e_setregs		= setregs,
+	.e_setregs		= cloudabi64_setregs,
 	.e_proc_exec		= NULL,
 	.e_proc_fork		= NULL,
 	.e_proc_exit		= NULL,
@@ -165,7 +192,7 @@ static struct execsw cloudabi64_execsw = {
 	.es_emul		= &cloudabi64_emul,
 	.es_prio		= EXECSW_PRIO_ANY,
 	.es_arglen		= ELF64_AUXSIZE,
-	.es_copyargs		= elf64_copyargs,
+	.es_copyargs		= cloudabi64_copyargs,
 	.es_setregs		= NULL,
 	.es_coredump		= coredump_elf64,
 	.es_setup_stack		= exec_setup_stack,
