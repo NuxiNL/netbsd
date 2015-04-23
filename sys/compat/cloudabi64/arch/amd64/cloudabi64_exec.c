@@ -39,10 +39,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <compat/cloudabi64/cloudabi64_syscall.h>
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 
-#include <uvm/uvm_extern.h>
+#include <crypto/cprng_fast/cprng_fast.h>
 
-#define ELF64_AUXSIZE (howmany(ELF_AUX_ENTRIES * sizeof(Aux64Info), \
-    sizeof(Elf64_Addr)) + MAXPATHLEN + ALIGN(1))
+#include <uvm/uvm_extern.h>
 
 extern struct sysent cloudabi64_sysent[];
 
@@ -57,7 +56,8 @@ cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
 	 * should be set to its size, so crt0.c can zero pad the
 	 * structure if necessary.
 	 */
-	setregs(l, pack, stack);
+	/* TODO(ed): Why do we need to fix up the stack alignment here? */
+	setregs(l, pack, stack - 8);
 	tf = l->l_md.md_regs;
 	tf->tf_rdi = stack;
 	tf->tf_rsi = sizeof(cloudabi64_startup_data_t);
@@ -139,9 +139,20 @@ static int
 cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
     struct ps_strings *arginfo, char **stackp, void *argp)
 {
+	Elf_Ehdr *eh = pack->ep_hdr;
+	cloudabi64_startup_data_t startup_data = {
+		.sd_elf_phdr	= eh->e_phoff + 0x400000,
+		.sd_elf_phdrlen	= eh->e_phnum,
 
-	/* TODO(ed): Customize this. */
-	return (elf64_copyargs(l, pack, arginfo, stackp, argp));
+		.sd_thread_id	= l->l_lid,
+		.sd_random_seed	= cprng_fast64(),
+
+		.sd_ncpus	= ncpu,
+		.sd_pagesize	= PAGE_SIZE,
+	};
+
+	/* TODO(ed): Is this done at the right offset? */
+	return (copyout(&startup_data, *stackp, sizeof(startup_data)));
 }
 
 static struct emul cloudabi64_emul = {
@@ -191,7 +202,7 @@ static struct execsw cloudabi64_execsw = {
 	.u.elf_probe_func	= cloudabi64_elf_probe,
 	.es_emul		= &cloudabi64_emul,
 	.es_prio		= EXECSW_PRIO_ANY,
-	.es_arglen		= ELF64_AUXSIZE,
+	.es_arglen		= 0,
 	.es_copyargs		= cloudabi64_copyargs,
 	.es_setregs		= NULL,
 	.es_coredump		= coredump_elf64,
