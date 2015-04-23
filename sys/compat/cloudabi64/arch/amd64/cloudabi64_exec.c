@@ -57,7 +57,7 @@ cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
 	 * structure if necessary.
 	 */
 	/* TODO(ed): Why do we need to fix up the stack alignment here? */
-	setregs(l, pack, stack - 8);
+	setregs(l, pack, stack / 16 * 16 - 8);
 	tf = l->l_md.md_regs;
 	tf->tf_rdi = stack;
 	tf->tf_rsi = sizeof(cloudabi64_startup_data_t);
