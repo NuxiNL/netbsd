@@ -139,6 +139,7 @@ static int
 cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
     struct ps_strings *arginfo, char **stackp, void *argp)
 {
+	/* TODO(ed): Use proper offset instead of 0x400000. */
 	Elf_Ehdr *eh = pack->ep_hdr;
 	cloudabi64_startup_data_t startup_data = {
 		.sd_elf_phdr	= eh->e_phoff + 0x400000,
