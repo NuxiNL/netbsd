@@ -28,6 +28,8 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 
+#include <machine/sysarch.h>
+
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
 
@@ -44,5 +46,5 @@ cloudabi64_sys_thread_tcb_set(struct lwp *l,
     const struct cloudabi64_sys_thread_tcb_set_args *uap, register_t *retval)
 {
 
-	return (ENOSYS);
+	return (x86_set_sdbase(SCARG(uap, tcb), 'f', l, true));
 }
