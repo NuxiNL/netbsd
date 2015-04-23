@@ -27,6 +27,9 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/cprng.h>
+#include <sys/proc.h>
+#include <sys/uio.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
@@ -34,6 +37,30 @@ int
 cloudabi_sys_random_get(struct lwp *l,
     const struct cloudabi_sys_random_get_args *uap, register_t *retval)
 {
+	struct iovec iov = {
+		.iov_base = SCARG(uap, buf),
+		.iov_len = SCARG(uap, nbyte),
+	};
+	struct uio uio = {
+		.uio_iov = &iov,
+		.uio_iovcnt = 1,
+		.uio_resid = iov.iov_len,
+		.uio_rw = UIO_READ,
+		.uio_vmspace = l->l_proc->p_vmspace,
+	};
 
-	return (ENOSYS);
+	/* Move random data to userspace. */
+	while (uio.uio_resid > 0) {
+		char buf[1024];
+		size_t len;
+		int error;
+
+		len = MIN(sizeof(buf), uio.uio_resid);
+		cprng_strong(kern_cprng, buf, len, 0);
+		error = uiomove(buf, len, &uio);
+		if (error != 0) {
+			return (error);
+		}
+	}
+	return (0);
 }
