@@ -1,2 +1,7 @@
 include "arch/amd64/conf/GENERIC"
 options COMPAT_CLOUDABI64
+
+options DEBUG
+options LOCKDEBUG
+options KMEMSTATS
+options DDB_COMMANDONENTER="bt"
