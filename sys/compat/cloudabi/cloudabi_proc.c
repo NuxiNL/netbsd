@@ -40,7 +40,7 @@ cloudabi_sys_proc_exit(struct lwp *l,
 	struct sys_exit_args sys_exit_args;
 
 	SCARG(&sys_exit_args, rval) = SCARG(uap, rval);
-	return sys_exit(l, &sys_exit_args, retval);
+	return (sys_exit(l, &sys_exit_args, retval));
 }
 
 int

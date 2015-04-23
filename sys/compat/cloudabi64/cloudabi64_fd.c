@@ -27,38 +27,71 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/syscallargs.h>
 
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
+
+static_assert(sizeof(cloudabi64_ciovec_t) == sizeof(struct iovec),
+    "Size mismatch");
+static_assert(offsetof(cloudabi64_ciovec_t, iov_base) ==
+    offsetof(struct iovec, iov_base), "Offset mismatch");
+static_assert(offsetof(cloudabi64_ciovec_t, iov_len) ==
+    offsetof(struct iovec, iov_len), "Offset mismatch");
+
+static_assert(sizeof(cloudabi64_ciovec_t) == sizeof(struct iovec),
+    "Size mismatch");
+static_assert(offsetof(cloudabi64_iovec_t, iov_base) ==
+    offsetof(struct iovec, iov_base), "Offset mismatch");
+static_assert(offsetof(cloudabi64_iovec_t, iov_len) ==
+    offsetof(struct iovec, iov_len), "Offset mismatch");
 
 int
 cloudabi64_sys_fd_pread(struct lwp *l,
     const struct cloudabi64_sys_fd_pread_args *uap, register_t *retval)
 {
+	struct sys_preadv_args sys_preadv_args;
 
-	return (ENOSYS);
+	SCARG(&sys_preadv_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_preadv_args, iovp) = (const struct iovec *)SCARG(uap, iov);
+	SCARG(&sys_preadv_args, iovcnt) = SCARG(uap, iovcnt);
+	SCARG(&sys_preadv_args, offset) = SCARG(uap, offset);
+	return (sys_preadv(l, &sys_preadv_args, retval));
 }
 
 int
 cloudabi64_sys_fd_pwrite(struct lwp *l,
     const struct cloudabi64_sys_fd_pwrite_args *uap, register_t *retval)
 {
+	struct sys_pwritev_args sys_pwritev_args;
 
-	return (ENOSYS);
+	SCARG(&sys_pwritev_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_pwritev_args, iovp) = (const struct iovec *)SCARG(uap, iov);
+	SCARG(&sys_pwritev_args, iovcnt) = SCARG(uap, iovcnt);
+	SCARG(&sys_pwritev_args, offset) = SCARG(uap, offset);
+	return (sys_pwritev(l, &sys_pwritev_args, retval));
 }
 
 int
 cloudabi64_sys_fd_read(struct lwp *l,
     const struct cloudabi64_sys_fd_read_args *uap, register_t *retval)
 {
+	struct sys_readv_args sys_readv_args;
 
-	return (ENOSYS);
+	SCARG(&sys_readv_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_readv_args, iovp) = (const struct iovec *)SCARG(uap, iov);
+	SCARG(&sys_readv_args, iovcnt) = SCARG(uap, iovcnt);
+	return (sys_readv(l, &sys_readv_args, retval));
 }
 
 int
 cloudabi64_sys_fd_write(struct lwp *l,
     const struct cloudabi64_sys_fd_write_args *uap, register_t *retval)
 {
+	struct sys_writev_args sys_writev_args;
 
-	return (ENOSYS);
+	SCARG(&sys_writev_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_writev_args, iovp) = (const struct iovec *)SCARG(uap, iov);
+	SCARG(&sys_writev_args, iovcnt) = SCARG(uap, iovcnt);
+	return (sys_writev(l, &sys_writev_args, retval));
 }
