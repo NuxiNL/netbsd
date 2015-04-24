@@ -335,6 +335,34 @@ pathbuf_copyin(const char *userpath, struct pathbuf **ret)
 	return 0;
 }
 
+int
+pathbuf_copyin_length(const char *userpath, size_t length, struct pathbuf **ret)
+{
+	struct pathbuf *pb;
+	int error;
+
+	if (length >= PATH_MAX)
+		return (ENAMETOOLONG);
+	pb = pathbuf_create_raw();
+	if (pb == NULL) {
+		return ENOMEM;
+	}
+	error = copyin(userpath, pb->pb_path, length);
+	if (error == 0 && memchr(pb->pb_path, '\0', length) != NULL) {
+		/* Pathname contains null byte. */
+		error = EINVAL;
+	}
+	if (error) {
+		pathbuf_destroy(pb);
+		return error;
+	}
+
+	/* Null terminate the string. */
+	pb->pb_path[length] = '\0';
+	*ret = pb;
+	return (0);
+}
+
 /*
  * XXX should not exist:
  *   1. whether a pointer is kernel or user should be statically checkable.

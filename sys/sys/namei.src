@@ -64,6 +64,7 @@ struct pathbuf;
 struct pathbuf *pathbuf_create(const char *path);
 struct pathbuf *pathbuf_assimilate(char *path);
 int pathbuf_copyin(const char *userpath, struct pathbuf **ret);
+int pathbuf_copyin_length(const char *userpath, size_t length, struct pathbuf **ret);
 void pathbuf_destroy(struct pathbuf *);
 
 /* get a copy of the (current) path string */
