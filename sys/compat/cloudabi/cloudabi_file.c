@@ -27,8 +27,27 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/namei.h>
+#include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+
+static int
+cloudabi_namei(struct lwp *l, int fdat, struct nameidata *ndp)
+{
+	file_t *dfp;
+	int error;
+
+	error = fd_getvnode(fdat, &dfp);
+	if (error == 0) {
+		NDAT(ndp, dfp->f_vnode);
+		error = namei(ndp);
+		fd_putfile(fdat);
+	}
+	return (error);
+}
 
 int
 cloudabi_sys_file_advise(struct lwp *l,
@@ -50,8 +69,48 @@ int
 cloudabi_sys_file_create(struct lwp *l,
     const struct cloudabi_sys_file_create_args *uap, register_t *retval)
 {
+	struct nameidata nd;
+	struct vattr vattr;
+	struct pathbuf *pb;
+	struct vnode *vp;
+	int error;
 
-	return (ENOSYS);
+	/* TODO(ed): Also support the creation of fifos. */
+	if (SCARG(uap, type) != CLOUDABI_FILETYPE_DIRECTORY)
+		return (EINVAL);
+
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error != 0)
+		return (error);
+
+	/* TODO(ed): Limit lookup to local directory. */
+	NDINIT(&nd, CREATE, LOCKPARENT | CREATEDIR, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	if (error != 0) {
+		pathbuf_destroy(pb);
+		return (error);
+	}
+	vp = nd.ni_vp;
+	if (vp != NULL) {
+		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
+		if (nd.ni_dvp == vp)
+			vrele(nd.ni_dvp);
+		else
+			vput(nd.ni_dvp);
+		vrele(vp);
+		pathbuf_destroy(pb);
+		return (EEXIST);
+	}
+	vattr_null(&vattr);
+	vattr.va_type = VDIR;
+	vattr.va_mode = 0777 &~ l->l_proc->p_cwdi->cwdi_cmask;
+	error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
+	if (error == 0)
+		vrele(nd.ni_vp);
+	vput(nd.ni_dvp);
+	pathbuf_destroy(pb);
+	return (error);
 }
 
 int
