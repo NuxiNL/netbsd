@@ -269,7 +269,8 @@ int	ioctl_copyout(int ioctlflags, const void *src, void *dst, size_t len);
 
 int	ucas_ptr(volatile void *, void *, void *, void *);
 int	ucas_int(volatile int *, int, int, int *);
-int	ucas_int32(volatile int32_t *, int32_t, int32_t, int32_t *);
+int	ucas_32(volatile int32_t *, int32_t, int32_t, int32_t *);
+int	ucas_64(volatile int64_t *, int64_t, int64_t, int64_t *);
 
 int	subyte(void *, int);
 int	suibyte(void *, int);
