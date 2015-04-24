@@ -360,7 +360,7 @@ pathbuf_copyin_length(const char *userpath, size_t length, struct pathbuf **ret)
 	/* Null terminate the string. */
 	pb->pb_path[length] = '\0';
 	*ret = pb;
-	return (0);
+	return 0;
 }
 
 /*

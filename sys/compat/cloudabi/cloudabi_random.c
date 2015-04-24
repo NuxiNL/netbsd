@@ -58,9 +58,8 @@ cloudabi_sys_random_get(struct lwp *l,
 		len = MIN(sizeof(buf), uio.uio_resid);
 		cprng_strong(kern_cprng, buf, len, 0);
 		error = uiomove(buf, len, &uio);
-		if (error != 0) {
+		if (error != 0)
 			return (error);
-		}
 	}
 	return (0);
 }
