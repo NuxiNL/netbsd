@@ -28,7 +28,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
+#include <sys/systm.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
@@ -82,10 +84,17 @@ __KERNEL_RCSID(0, "$NetBSD$");
  * TODO(ed): Optimize non-pshared locks.
  */
 
+struct futex_address;
 struct futex_condvar;
 struct futex_lock;
 struct futex_queue;
 struct futex_waiter;
+
+/* Identifier of a location in memory. */
+/* TODO(ed): Fix process-shared locks. */
+struct futex_address {
+	const void *			fa_object;
+};
 
 /* A set of waiting threads. */
 struct futex_queue {
@@ -95,6 +104,9 @@ struct futex_queue {
 
 /* Condition variables. */
 struct futex_condvar {
+	/* Address of the condition variable. */
+	struct futex_address		fc_address;
+
 	/* The lock the waiters should be moved to when signalled. */
 	struct futex_lock *		fc_lock;
 
@@ -112,6 +124,9 @@ struct futex_condvar {
 
 /* Read-write locks. */
 struct futex_lock {
+	/* Address of the lock. */
+	struct futex_address		fl_address;
+
 	/*
 	 * Current owner of the lock. LOCK_UNMANAGED if the lock is
 	 * currently not owned by the kernel. LOCK_OWNER_UNKNOWN in case
@@ -150,7 +165,17 @@ struct futex_waiter {
 	struct futex_queue		fw_donated;
 };
 
+/* Global data structures. */
+static kmutex_t futex_global_lock;
+
+static LIST_HEAD(, futex_lock) futex_lock_list =
+    LIST_HEAD_INITIALIZER(&futex_lock_list);
+static LIST_HEAD(, futex_condvar) futex_condvar_list =
+    LIST_HEAD_INITIALIZER(&futex_condvar_list);
+
 /* Utility functions. */
+static void futex_lock_assert(const struct futex_lock *);
+static struct futex_lock *futex_lock_lookup_locked(struct futex_address *);
 static void futex_lock_release(struct futex_lock *);
 static int futex_lock_tryrdlock(struct futex_lock *, cloudabi_lock_t *);
 static int futex_lock_unmanage(struct futex_lock *, cloudabi_lock_t *);
@@ -173,16 +198,68 @@ static int cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *,
     cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
 
 /*
+ * futex_address operations.
+ */
+
+static int
+futex_address_create(struct futex_address *fa, struct lwp *l,
+    const void *object)
+{
+
+	fa->fa_object = object;
+	return (0);
+}
+
+static void
+futex_address_free(struct futex_address *fa)
+{
+}
+
+static bool
+futex_address_match(const struct futex_address *fa1,
+    const struct futex_address *fa2)
+{
+
+	return (fa1->fa_object == fa2->fa_object);
+}
+
+/*
  * futex_condvar operations.
  */
+
+static void
+futex_condvar_assert(const struct futex_condvar *fc)
+{
+
+	KASSERT(fc->fc_waitcount >= futex_queue_count(&fc->fc_waiters));
+	futex_lock_assert(fc->fc_lock);
+}
 
 static int
 futex_condvar_lookup(struct lwp *l, const cloudabi_condvar_t *address,
     struct futex_condvar **fcret)
 {
+	struct futex_address fa_condvar;
+	struct futex_condvar *fc;
+	int error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	error = futex_address_create(&fa_condvar, l, address);
+	if (error != 0)
+		return (error);
+
+	mutex_enter(&futex_global_lock);
+	LIST_FOREACH(fc, &futex_condvar_list, fc_next) {
+		if (futex_address_match(&fc->fc_address, &fa_condvar)) {
+			/* Found matching lock object. */
+			futex_address_free(&fa_condvar);
+			futex_condvar_assert(fc);
+			*fcret = fc;
+			return (0);
+		}
+	}
+	mutex_exit(&futex_global_lock);
+	futex_address_free(&fa_condvar);
+	return (ENOENT);
 }
 
 static int
@@ -190,16 +267,66 @@ futex_condvar_lookup_or_create(struct lwp *l,
     const cloudabi_condvar_t *condvar, const cloudabi_lock_t *lock,
     struct futex_condvar **fcret)
 {
+	struct futex_address fa_condvar, fa_lock;
+	struct futex_condvar *fc;
+	struct futex_lock *fl;
+	int error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	error = futex_address_create(&fa_condvar, l, condvar);
+	if (error != 0)
+		return (error);
+	error = futex_address_create(&fa_lock, l, lock);
+	if (error != 0) {
+		futex_address_free(&fa_condvar);
+		return (error);
+	}
+
+	mutex_enter(&futex_global_lock);
+	LIST_FOREACH(fc, &futex_condvar_list, fc_next) {
+		if (!futex_address_match(&fc->fc_address, &fa_condvar))
+			continue;
+		fl = fc->fc_lock;
+		if (!futex_address_match(&fl->fl_address, &fa_lock)) {
+			/* Condition variable is owned by a different lock. */
+			futex_address_free(&fa_condvar);
+			futex_address_free(&fa_lock);
+			mutex_exit(&futex_global_lock);
+			return (EINVAL);
+		}
+
+		/* Found fully matching condition variable. */
+		futex_address_free(&fa_condvar);
+		futex_address_free(&fa_lock);
+		futex_condvar_assert(fc);
+		*fcret = fc;
+		return (0);
+	}
+
+	/* None found. Create new condition variable object. */
+	fc = malloc(sizeof(*fc), M_FUTEX, M_WAITOK);
+	fc->fc_address = fa_condvar;
+	fc->fc_lock = futex_lock_lookup_locked(&fa_lock);
+	futex_queue_init(&fc->fc_waiters);
+	fc->fc_waitcount = 0;
+	LIST_INSERT_HEAD(&futex_condvar_list, fc, fc_next);
+	*fcret = fc;
+	return (0);
 }
 
 static void
 futex_condvar_release(struct futex_condvar *fc)
 {
+	struct futex_lock *fl;
 
-	/* TODO(ed): Implement. */
+	futex_condvar_assert(fc);
+	fl = fc->fc_lock;
+	if (fc->fc_waitcount == 0) {
+		/* Condition variable has no waiters. Deallocate it. */
+		futex_address_free(&fc->fc_address);
+		LIST_REMOVE(fc, fc_next);
+		free(fc, M_FUTEX);
+	}
+	futex_lock_release(fl);
 }
 
 static int
@@ -217,13 +344,60 @@ futex_condvar_unmanage(struct futex_condvar *fc,
  * futex_lock operations.
  */
 
+static void
+futex_lock_assert(const struct futex_lock *fl)
+{
+
+	/*
+	 * A futex lock can only be kernel-managed if it has waiters.
+	 * Vice versa: if a futex lock has waiters, it must be
+	 * kernel-managed.
+	 */
+	KASSERT((fl->fl_owner == LOCK_UNMANAGED) ==
+	    (futex_queue_count(&fl->fl_readers) == 0 &&
+	    futex_queue_count(&fl->fl_writers) == 0));
+	KASSERT(fl->fl_waitcount != 0 || fl->fl_owner == LOCK_UNMANAGED);
+}
+
 static int
 futex_lock_lookup(struct lwp *l, const cloudabi_lock_t *address,
     struct futex_lock **flret)
 {
+	struct futex_address fa;
+	int error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	error = futex_address_create(&fa, l, address);
+	if (error != 0)
+		return (error);
+
+	mutex_enter(&futex_global_lock);
+	*flret = futex_lock_lookup_locked(&fa);
+	return (0);
+}
+
+static struct futex_lock *
+futex_lock_lookup_locked(struct futex_address *fa)
+{
+	struct futex_lock *fl;
+
+	LIST_FOREACH(fl, &futex_lock_list, fl_next) {
+		if (futex_address_match(&fl->fl_address, fa)) {
+			/* Found matching lock object. */
+			futex_address_free(fa);
+			futex_lock_assert(fl);
+			return (fl);
+		}
+	}
+
+	/* None found. Create new lock object. */
+	fl = malloc(sizeof(*fl), M_FUTEX, M_WAITOK);
+	fl->fl_address = *fa;
+	fl->fl_owner = LOCK_UNMANAGED;
+	futex_queue_init(&fl->fl_readers);
+	futex_queue_init(&fl->fl_writers);
+	fl->fl_waitcount = 0;
+	LIST_INSERT_HEAD(&futex_lock_list, fl, fl_next);
+	return (fl);
 }
 
 static int
@@ -252,7 +426,15 @@ static void
 futex_lock_release(struct futex_lock *fl)
 {
 
-	/* TODO(ed): Implement. */
+	futex_lock_assert(fl);
+	if (fl->fl_waitcount == 0) {
+		/* Lock object is unreferenced. Deallocate it. */
+		KASSERT(fl->fl_owner == LOCK_UNMANAGED);
+		futex_address_free(&fl->fl_address);
+		LIST_REMOVE(fl, fl_next);
+		free(fl, M_FUTEX);
+	}
+	mutex_exit(&futex_global_lock);
 }
 
 static int
@@ -270,7 +452,7 @@ futex_lock_unmanage(struct futex_lock *fl, cloudabi_lock_t *lock)
 			return (EFAULT);
 		for (;;) {
 			cmp = old;
-			if (ucas_int32(lock, cmp,
+			if (ucas_32(lock, cmp,
 			    cmp & ~CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
 				return (EFAULT);
 			if (old == cmp)
@@ -355,7 +537,7 @@ futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 			 * it by increasing the read count.
 			 */
 			cmp = old;
-			if (ucas_int32(address, cmp, cmp + 1, &old) != 0)
+			if (ucas_32(address, cmp, cmp + 1, &old) != 0)
 				return (EFAULT);
 			if (old == cmp) {
 				/* Success. */
@@ -364,7 +546,7 @@ futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 		} else {
 			/* Lock is read-locked. Make it kernel-managed. */
 			cmp = old;
-			if (ucas_int32(address, cmp,
+			if (ucas_32(address, cmp,
 			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
 				return (EFAULT);
 			if (old == cmp) {
@@ -410,7 +592,7 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
 			new = tid | CLOUDABI_LOCK_WRLOCKED;
 			if (force_kernel_managed)
 				new |= CLOUDABI_LOCK_KERNEL_MANAGED;
-			if (ucas_int32(address, CLOUDABI_LOCK_UNLOCKED, new,
+			if (ucas_32(address, CLOUDABI_LOCK_UNLOCKED, new,
 			    &old) != 0)
 				return (EFAULT);
 			if (old == CLOUDABI_LOCK_UNLOCKED) {
@@ -422,7 +604,7 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
 		} else {
 			/* Lock is still locked. Make it kernel-managed. */
 			cmp = old;
-			if (ucas_int32(address, cmp,
+			if (ucas_32(address, cmp,
 			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
 				return (EFAULT);
 			if (old == cmp) {
@@ -547,9 +729,52 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
     struct futex_waiter *fw, struct lwp *l, cloudabi_clockid_t clock_id,
     cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
+	int error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	/* Initialize futex_waiter object. */
+	fw->fw_tid = l->l_lid;
+	fw->fw_locked = false;
+	futex_queue_init(&fw->fw_donated);
+
+	/* Place object in the queue. */
+	fw->fw_queue = fq;
+	STAILQ_INSERT_TAIL(&fq->fq_list, fw, fw_next);
+	++fq->fq_count;
+
+	cv_init(&fw->fw_wait, "futex");
+	++fl->fl_waitcount;
+
+	/* Wait respecting the timeout. */
+	/* TODO(ed): Use cv_timedwait_sig() here. */
+	futex_lock_assert(fl);
+	error = cv_wait_sig(&fw->fw_wait, &futex_global_lock);
+	futex_lock_assert(fl);
+	if (error == EWOULDBLOCK &&
+	    fw->fw_queue != NULL && fw->fw_queue != fq) {
+		/*
+		 * We got signalled on a condition variable, but
+		 * observed a timeout while waiting to reacquire the
+		 * lock. In other words, we didn't actually time out. Go
+		 * back to sleep and wait for the lock to be reacquired.
+		 */
+		error = cv_wait_sig(&fw->fw_wait, &futex_global_lock);
+		futex_lock_assert(fl);
+	}
+
+	--fl->fl_waitcount;
+	cv_destroy(&fw->fw_wait);
+
+	fq = fw->fw_queue;
+	if (fq == NULL) {
+		/* Thread got dequeued, so we've slept successfully. */
+		return (0);
+	}
+
+	/* Thread is still enqueued. Remove it. */
+	KASSERT(error != 0);
+	STAILQ_REMOVE(&fq->fq_list, fw, futex_waiter, fw_next);
+	--fq->fq_count;
+	return (error == EWOULDBLOCK ? ETIMEDOUT : error);
 }
 
 /* Moves up to nwaiters waiters from one queue to another. */
@@ -822,4 +1047,22 @@ cloudabi_sys_lock_unlock(struct lwp *l,
 	error = futex_lock_unlock(fl, l, SCARG(uap, lock));
 	futex_lock_release(fl);
 	return (error);
+}
+
+/*
+ * Initialization and teardown.
+ */
+
+void
+cloudabi_futex_init(void)
+{
+
+	mutex_init(&futex_global_lock, MUTEX_DEFAULT, IPL_NONE);
+}
+
+void
+cloudabi_futex_destroy(void)
+{
+
+	mutex_destroy(&futex_global_lock);
 }

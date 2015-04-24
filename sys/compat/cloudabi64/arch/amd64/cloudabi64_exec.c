@@ -213,12 +213,21 @@ static struct execsw cloudabi64_execsw = {
 static int
 compat_cloudabi64_modcmd(modcmd_t cmd, void *arg)
 {
+	int error;
 
 	switch (cmd) {
 	case MODULE_CMD_INIT:
-		return (exec_add(&cloudabi64_execsw, 1));
+		/* TODO(ed): Futex initialization should go elsewhere. */
+		cloudabi_futex_init();
+		error = exec_add(&cloudabi64_execsw, 1);
+		if (error != 0)
+			cloudabi_futex_destroy();
+		return (error);
 	case MODULE_CMD_FINI:
-		return (exec_remove(&cloudabi64_execsw, 1));
+		error = exec_remove(&cloudabi64_execsw, 1);
+		if (error == 0)
+			cloudabi_futex_destroy();
+		return (error);
 	default:
 		return (ENOTTY);
 	}

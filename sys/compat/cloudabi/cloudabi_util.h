@@ -35,6 +35,10 @@ struct lwp;
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
 
+/* Initialization of the futex pool. */
+void cloudabi_futex_init(void);
+void cloudabi_futex_destroy(void);
+
 /*
  * Blocking futex functions.
  *
