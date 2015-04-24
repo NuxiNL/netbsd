@@ -30,7 +30,23 @@
 
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
 
+struct proc;
+
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
+
+/*
+ * Blocking futex functions.
+ *
+ * These functions are called by CloudABI's polling system calls to
+ * sleep on a lock or condition variable.
+ */
+int cloudabi_futex_condvar_wait(struct lwp *, cloudabi_condvar_t *,
+    cloudabi_lock_t *, cloudabi_clockid_t, cloudabi_timestamp_t,
+    cloudabi_timestamp_t);
+int cloudabi_futex_lock_rdlock(struct lwp *, cloudabi_lock_t *,
+    cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
+int cloudabi_futex_lock_wrlock(struct lwp *, cloudabi_lock_t *,
+    cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
 
 #endif
