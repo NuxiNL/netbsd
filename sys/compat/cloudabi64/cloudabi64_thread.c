@@ -54,6 +54,10 @@ cloudabi64_sys_thread_create(struct lwp *l,
 	 * cloudabi64_startlwp().
 	 */
 	error = do_lwp_create(l, threadattr, LWP_DETACHED, &lid);
+	if (error != 0) {
+		kmem_free(threadattr, sizeof(*threadattr));
+		return (error);
+	}
 	retval[0] = lid;
-	return (error);
+	return (0);
 }
