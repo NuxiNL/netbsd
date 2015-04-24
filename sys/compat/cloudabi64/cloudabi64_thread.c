@@ -27,16 +27,33 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
-
-#include <machine/sysarch.h>
+#include <sys/kmem.h>
+#include <sys/lwp.h>
 
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
 
 int
-cloudabi64_sys_thread_tcb_set(struct lwp *l,
-    const struct cloudabi64_sys_thread_tcb_set_args *uap, register_t *retval)
+cloudabi64_sys_thread_create(struct lwp *l,
+    const struct cloudabi64_sys_thread_create_args *uap, register_t *retval)
 {
+	cloudabi64_threadattr_t *threadattr;
+	lwpid_t lid;
+	int error;
 
-	return (x86_set_sdbase(SCARG(uap, tcb), 'f', l, true));
+	/* Copy in the thread creation attributes. */
+	threadattr = kmem_alloc(sizeof(*threadattr), KM_SLEEP);
+	error = copyin(SCARG(uap, attr), threadattr, sizeof(*threadattr));
+	if (error != 0) {
+		kmem_free(threadattr, sizeof(*threadattr));
+		return (error);
+	}
+
+	/*
+	 * Create a new thread. Provide the attributes to
+	 * cloudabi64_startlwp().
+	 */
+	error = do_lwp_create(l, threadattr, LWP_DETACHED, &lid);
+	retval[0] = lid;
+	return (error);
 }

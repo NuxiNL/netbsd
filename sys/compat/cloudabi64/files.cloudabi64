@@ -9,3 +9,4 @@ file	compat/cloudabi64/cloudabi64_proc.c	compat_cloudabi64
 file	compat/cloudabi64/cloudabi64_sock.c	compat_cloudabi64
 file	compat/cloudabi64/cloudabi64_syscalls.c	compat_cloudabi64
 file	compat/cloudabi64/cloudabi64_sysent.c	compat_cloudabi64
+file	compat/cloudabi64/cloudabi64_thread.c	compat_cloudabi64

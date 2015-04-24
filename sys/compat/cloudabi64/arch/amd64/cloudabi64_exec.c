@@ -29,6 +29,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/types.h>
 #include <sys/exec.h>
 #include <sys/exec_elf.h>
+#include <sys/kmem.h>
 #include <sys/module.h>
 #include <sys/proc.h>
 #include <sys/syscallvar.h>
@@ -125,6 +126,33 @@ cloudabi64_syscall_intern(struct proc *p)
 	p->p_md.md_syscall = cloudabi64_syscall;
 }
 
+static void
+cloudabi64_startlwp(void *arg)
+{
+	struct exec_package pack;
+	cloudabi64_threadattr_t *threadattr = arg;
+	struct lwp *l = curlwp;
+	struct trapframe *tf;
+
+	/* Reset register contents to initial values. */
+	pack.ep_osversion = UINT32_MAX;
+	pack.ep_entry = threadattr->entry_point;
+	setregs(l, &pack,
+	    (threadattr->stack + threadattr->stack_size) / 16 * 16 - 8);
+
+	/*
+	 * Set the first function argument to the thread ID. The second
+	 * argument corresponds with the argument provided by the parent
+	 * thread.
+	 */
+	tf = l->l_md.md_regs;
+	tf->tf_rdi = l->l_lid;
+	tf->tf_rsi = threadattr->argument;
+
+	kmem_free(threadattr, sizeof(*threadattr));
+	userret(l);
+}
+
 static int
 cloudabi64_elf_probe(struct lwp *l, struct exec_package *epp, void *veh,
     char *itp, vaddr_t *pos)
@@ -193,7 +221,7 @@ static struct emul cloudabi64_emul = {
 	.e_vm_default_addr	= uvm_default_mapaddr,
 	.e_usertrap		= NULL,
 	.e_ucsize		= 0,
-	.e_startlwp		= NULL,
+	.e_startlwp		= cloudabi64_startlwp,
 	.e_dtrace_syscall	= NULL,
 };
 
