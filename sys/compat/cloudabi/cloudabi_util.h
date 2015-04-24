@@ -30,7 +30,7 @@
 
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
 
-struct proc;
+struct lwp;
 
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
