@@ -269,6 +269,7 @@ int	ioctl_copyout(int ioctlflags, const void *src, void *dst, size_t len);
 
 int	ucas_ptr(volatile void *, void *, void *, void *);
 int	ucas_int(volatile int *, int, int, int *);
+int	ucas_int32(volatile int32_t *, int32_t, int32_t, int32_t *);
 
 int	subyte(void *, int);
 int	suibyte(void *, int);
@@ -277,6 +278,7 @@ int	suisword(void *, short);
 int	suswintr(void *, short);
 int	suword(void *, long);
 int	suiword(void *, long);
+int	suword32(void *, int32_t);
 
 int	fubyte(const void *);
 int	fuibyte(const void *);
@@ -285,6 +287,7 @@ int	fuisword(const void *);
 int	fuswintr(const void *);
 long	fuword(const void *);
 long	fuiword(const void *);
+int	fueword32(const void *, int32_t *);
 
 void	hardclock(struct clockframe *);
 void	softclock(void *);
