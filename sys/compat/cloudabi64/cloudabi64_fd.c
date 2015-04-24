@@ -39,7 +39,7 @@ static_assert(offsetof(cloudabi64_ciovec_t, iov_base) ==
 static_assert(offsetof(cloudabi64_ciovec_t, iov_len) ==
     offsetof(struct iovec, iov_len), "Offset mismatch");
 
-static_assert(sizeof(cloudabi64_ciovec_t) == sizeof(struct iovec),
+static_assert(sizeof(cloudabi64_iovec_t) == sizeof(struct iovec),
     "Size mismatch");
 static_assert(offsetof(cloudabi64_iovec_t, iov_base) ==
     offsetof(struct iovec, iov_base), "Offset mismatch");
