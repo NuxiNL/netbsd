@@ -359,9 +359,24 @@ ENTRY(copystr)
 
 7:	ret
 
-ENTRY(fuword)
+ENTRY(fueword32)
 	DEFERRED_SWITCH_CHECK
 	movq	$VM_MAXUSER_ADDRESS-4,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+	xorl	%eax,%eax
+	movl	(%rdi),%r11d
+	movq	%rax,PCB_ONFAULT(%rcx)
+	movl	%r11d,(%rsi)
+	ret
+	DEFERRED_SWITCH_CALL
+
+ENTRY(fuword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-8,%r11
 	cmpq	%r11,%rdi
 	ja	_C_LABEL(fusuaddrfault)
 	GET_CURPCB(%rcx)
@@ -411,9 +426,25 @@ ENTRY(fubyte)
 	ret
 	DEFERRED_SWITCH_CALL
 
-ENTRY(suword)
+ENTRY(suword32)
 	DEFERRED_SWITCH_CHECK
 	movq	$VM_MAXUSER_ADDRESS-4,%r11
+	cmpq	%r11,%rdi
+	ja	_C_LABEL(fusuaddrfault)
+
+	GET_CURPCB(%rcx)
+	leaq	_C_LABEL(fusufailure)(%rip),%r11
+	movq	%r11,PCB_ONFAULT(%rcx)
+
+	movl	%esi,(%rdi)
+	xorq	%rax,%rax
+	movq	%rax,PCB_ONFAULT(%rcx)
+	ret
+	DEFERRED_SWITCH_CALL
+
+ENTRY(suword)
+	DEFERRED_SWITCH_CHECK
+	movq	$VM_MAXUSER_ADDRESS-8,%r11
 	cmpq	%r11,%rdi
 	ja	_C_LABEL(fusuaddrfault)
 
