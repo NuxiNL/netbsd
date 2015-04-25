@@ -62,8 +62,10 @@ int
 cloudabi_sys_fd_datasync(struct lwp *l,
     const struct cloudabi_sys_fd_datasync_args *uap, register_t *retval)
 {
+	struct sys_fdatasync_args sys_fdatasync_args;
 
-	return (ENOSYS);
+	SCARG(&sys_fdatasync_args, fd) = SCARG(uap, fd);
+	return (sys_fdatasync(l, &sys_fdatasync_args, retval));
 }
 
 int
@@ -136,6 +138,8 @@ int
 cloudabi_sys_fd_sync(struct lwp *l, const struct cloudabi_sys_fd_sync_args *uap,
     register_t *retval)
 {
+	struct sys_fsync_args sys_fsync_args;
 
-	return (ENOSYS);
+	SCARG(&sys_fsync_args, fd) = SCARG(uap, fd);
+	return (sys_fsync(l, &sys_fsync_args, retval));
 }
