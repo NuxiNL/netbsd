@@ -70,16 +70,24 @@ int
 cloudabi_sys_fd_dup(struct lwp *l, const struct cloudabi_sys_fd_dup_args *uap,
     register_t *retval)
 {
+	struct sys_dup_args sys_dup_args;
 
-	return (ENOSYS);
+	SCARG(&sys_dup_args, fd) = SCARG(uap, from);
+	return (sys_dup(l, &sys_dup_args, retval));
 }
 
 int
 cloudabi_sys_fd_replace(struct lwp *l,
     const struct cloudabi_sys_fd_replace_args *uap, register_t *retval)
 {
+	struct sys_dup2_args sys_dup2_args;
+	register_t discard[2];
 
-	return (ENOSYS);
+	/* This system call is supposed to return zero upon success. */
+	/* TODO(ed): This should disallow dupping to unused descriptors. */
+	SCARG(&sys_dup2_args, from) = SCARG(uap, from);
+	SCARG(&sys_dup2_args, to) = SCARG(uap, to);
+	return (sys_dup2(l, &sys_dup2_args, discard));
 }
 
 int
