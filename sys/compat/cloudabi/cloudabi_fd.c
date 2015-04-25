@@ -36,8 +36,10 @@ int
 cloudabi_sys_fd_close(struct lwp *l,
     const struct cloudabi_sys_fd_close_args *uap, register_t *retval)
 {
+	struct sys_close_args sys_close_args;
 
-	return (ENOSYS);
+	SCARG(&sys_close_args, fd) = SCARG(uap, fd);
+	return (sys_close(l, &sys_close_args, retval));
 }
 
 int
