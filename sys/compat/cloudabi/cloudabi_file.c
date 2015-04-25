@@ -104,7 +104,7 @@ cloudabi_sys_file_create(struct lwp *l,
 	}
 	vattr_null(&vattr);
 	vattr.va_type = VDIR;
-	vattr.va_mode = 0777 &~ l->l_proc->p_cwdi->cwdi_cmask;
+	vattr.va_mode = 0777 & ~l->l_proc->p_cwdi->cwdi_cmask;
 	error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
 	if (error == 0)
 		vrele(nd.ni_vp);
@@ -189,8 +189,53 @@ int
 cloudabi_sys_file_symlink(struct lwp *l,
     const struct cloudabi_sys_file_symlink_args *uap, register_t *retval)
 {
+	struct vattr vattr;
+	char *path;
+	int error;
+	struct pathbuf *linkpb;
+	struct nameidata nd;
 
-	return (ENOSYS);
+	if (SCARG(uap, path2len) >= MAXPATHLEN)
+		return (ENAMETOOLONG);
+
+	/* Copy in pathnames. */
+	path = PNBUF_GET();
+	error = copyin(SCARG(uap, path2), path, SCARG(uap, path2len));
+	if (error != 0)
+		goto out1;
+	path[SCARG(uap, path2len)] = '\0';
+	error = pathbuf_copyin_length(SCARG(uap, path1), SCARG(uap, path1len),
+	    &linkpb);
+	if (error != 0)
+		goto out1;
+
+	/* TODO(ed): Limit lookup to local directory. */
+	NDINIT(&nd, CREATE, LOCKPARENT, linkpb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	if (error != 0)
+		goto out2;
+	if (nd.ni_vp) {
+		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
+		if (nd.ni_dvp == nd.ni_vp)
+			vrele(nd.ni_dvp);
+		else
+			vput(nd.ni_dvp);
+		vrele(nd.ni_vp);
+		error = EEXIST;
+		goto out2;
+	}
+	vattr_null(&vattr);
+	vattr.va_type = VLNK;
+	vattr.va_mode = 0777 & ~l->l_proc->p_cwdi->cwdi_cmask;
+	error = VOP_SYMLINK(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr, path);
+	if (error == 0)
+		vrele(nd.ni_vp);
+	vput(nd.ni_dvp);
+out2:
+	pathbuf_destroy(linkpb);
+out1:
+	PNBUF_PUT(path);
+	return (error);
 }
 
 int
