@@ -42,11 +42,42 @@ cloudabi_sys_fd_close(struct lwp *l,
 	return (sys_close(l, &sys_close_args, retval));
 }
 
+static int
+create_socket(struct lwp *l, int type, register_t *retval)
+{
+	struct compat_30_sys_socket_args compat_30_sys_socket_args;
+
+	SCARG(&compat_30_sys_socket_args, domain) = AF_UNIX;
+	SCARG(&compat_30_sys_socket_args, type) = type;
+	SCARG(&compat_30_sys_socket_args, protocol) = 0;
+	return (compat_30_sys_socket(l, &compat_30_sys_socket_args, retval));
+}
+
 int
 cloudabi_sys_fd_create1(struct lwp *l,
     const struct cloudabi_sys_fd_create1_args *uap, register_t *retval)
 {
 
+	/* TODO(ed): Add support for shared memory. */
+	switch (SCARG(uap, type)) {
+	case CLOUDABI_FILETYPE_POLL:
+		return (sys_kqueue(l, NULL, retval));
+	case CLOUDABI_FILETYPE_SOCKET_DGRAM:
+		return (create_socket(l, SOCK_DGRAM, retval));
+	case CLOUDABI_FILETYPE_SOCKET_SEQPACKET:
+		return (create_socket(l, SOCK_SEQPACKET, retval));
+	case CLOUDABI_FILETYPE_SOCKET_STREAM:
+		return (create_socket(l, SOCK_STREAM, retval));
+	default:
+		return (EINVAL);
+	}
+}
+
+static int
+create_socketpair(struct lwp *l, int type, register_t *retval)
+{
+
+	/* TODO(ed): Implement. */
 	return (ENOSYS);
 }
 
@@ -55,7 +86,18 @@ cloudabi_sys_fd_create2(struct lwp *l,
     const struct cloudabi_sys_fd_create2_args *uap, register_t *retval)
 {
 
-	return (ENOSYS);
+	switch (SCARG(uap, type)) {
+	case CLOUDABI_FILETYPE_FIFO:
+		return (sys_pipe(l, NULL, retval));
+	case CLOUDABI_FILETYPE_SOCKET_DGRAM:
+		return (create_socketpair(l, SOCK_DGRAM, retval));
+	case CLOUDABI_FILETYPE_SOCKET_SEQPACKET:
+		return (create_socketpair(l, SOCK_SEQPACKET, retval));
+	case CLOUDABI_FILETYPE_SOCKET_STREAM:
+		return (create_socketpair(l, SOCK_STREAM, retval));
+	default:
+		return (EINVAL);
+	}
 }
 
 int
