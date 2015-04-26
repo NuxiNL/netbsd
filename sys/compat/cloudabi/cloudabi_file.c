@@ -129,14 +129,57 @@ int
 cloudabi_sys_file_open(struct lwp *l,
     const struct cloudabi_sys_file_open_args *uap, register_t *retval)
 {
+	cloudabi_fdstat_t fds;
 	struct nameidata nd;
 	file_t *dfp, *fp;
 	struct pathbuf *pb;
 	struct proc *p = l->l_proc;
-	int error, fd;
+	int error, fd, fflags;
 
-	/* TODO(ed): Properly compute the access mode. */
-	int flags = FREAD;
+	/* Copy in initial file descriptor properties. */
+	error = copyin(SCARG(uap, fds), &fds, sizeof(fds));
+	if (error != 0)
+		return (error);
+
+	/* Translate flags. */
+	fflags = O_NOCTTY;
+#define	COPY_FLAG(flag) do {						\
+	if (SCARG(uap, oflags) & CLOUDABI_O_##flag)			\
+		fflags |= O_##flag;					\
+} while (0)
+	COPY_FLAG(CREAT);
+	COPY_FLAG(DIRECTORY);
+	COPY_FLAG(EXCL);
+	COPY_FLAG(TRUNC);
+#undef COPY_FLAG
+#define	COPY_FLAG(flag) do {						\
+	if (fds.fs_flags & CLOUDABI_FDFLAG_##flag)			\
+		fflags |= O_##flag;					\
+} while (0)
+	COPY_FLAG(APPEND);
+	COPY_FLAG(DSYNC);
+	COPY_FLAG(NONBLOCK);
+	COPY_FLAG(RSYNC);
+	COPY_FLAG(SYNC);
+#undef COPY_FLAG
+	if ((SCARG(uap, fd) & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) == 0)
+		fflags |= O_NOFOLLOW;
+
+	/* Roughly convert rights to open() access mode. */
+	if ((fds.fs_rights_base &
+	    (CLOUDABI_RIGHT_FD_READ | CLOUDABI_RIGHT_FILE_READDIR)) != 0 &&
+	    (fds.fs_rights_base & CLOUDABI_RIGHT_FD_WRITE) != 0)
+		fflags |= FREAD | FWRITE;
+	else if ((fds.fs_rights_base &
+	    (CLOUDABI_RIGHT_FD_READ | CLOUDABI_RIGHT_FILE_READDIR)) != 0)
+		fflags |= FREAD;
+	else if ((fds.fs_rights_base & CLOUDABI_RIGHT_FD_WRITE) != 0)
+		fflags |= FWRITE;
+	else if ((fds.fs_rights_base &
+	    (CLOUDABI_RIGHT_PROC_EXEC | CLOUDABI_RIGHT_FILE_OPEN)) != 0)
+		fflags |= FREAD;
+	else
+		return (EINVAL);
 
 	/* Copy in the pathname. */
 	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
@@ -157,14 +200,14 @@ cloudabi_sys_file_open(struct lwp *l,
 	/* Attempt to open the file. */
 	CLOUDABI_NDINIT(&nd, LOOKUP, FOLLOW, pb);
 	NDAT(&nd, dfp->f_vnode);
-	error = vn_open(&nd, flags, CLOUDABI_MODE(l));
+	error = vn_open(&nd, fflags, CLOUDABI_MODE(l));
 	if (error != 0) {
 		fd_abort(p, fp, fd);
 		goto out2;
 	}
 
 	/* Initialize the new file descriptor. */
-	fp->f_flag = flags & FMASK;
+	fp->f_flag = fflags & FMASK;
 	fp->f_type = DTYPE_VNODE;
 	fp->f_ops = &vnops;
 	fp->f_vnode = nd.ni_vp;
