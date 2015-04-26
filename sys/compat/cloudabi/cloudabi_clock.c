@@ -30,18 +30,91 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
+/* Converts a CloudABI clock ID to a NetBSD clock ID. */
+static int
+convert_clockid(cloudabi_clockid_t in, clockid_t *out)
+{
+	switch (in) {
+	case CLOUDABI_CLOCK_MONOTONIC:
+		*out = CLOCK_MONOTONIC;
+		return 0;
+	case CLOUDABI_CLOCK_REALTIME:
+		*out = CLOCK_REALTIME;
+		return 0;
+	default:
+		return EINVAL;
+	}
+}
+
+#define NSEC_PER_SEC 1000000000
+
+/* Converts a struct timespec to a CloudABI timestamp. */
+static int
+convert_timespec_to_timestamp(const struct timespec *in,
+    cloudabi_timestamp_t *out)
+{
+	cloudabi_timestamp_t s, ns;
+
+	/* Timestamps from before the Epoch cannot be expressed. */
+	if (in->tv_sec < 0)
+		return (EOVERFLOW);
+
+	s = in->tv_sec;
+	ns = in->tv_nsec;
+	if (s > UINT64_MAX / NSEC_PER_SEC || (s == UINT64_MAX / NSEC_PER_SEC &&
+	    ns > UINT64_MAX % NSEC_PER_SEC)) {
+		/* Addition of seconds would cause an overflow. */
+		return (EOVERFLOW);
+	}
+
+	*out = s * NSEC_PER_SEC + ns;
+	return (0);
+}
+
 int
 cloudabi_sys_clock_res_get(struct lwp *l,
     const struct cloudabi_sys_clock_res_get_args *uap, register_t *retval)
 {
+	struct timespec ts;
+	cloudabi_timestamp_t cts;
+	int error;
+	clockid_t clockid;
 
-	return (ENOSYS);
+	error = convert_clockid(SCARG(uap, clock_id), &clockid);
+	if (error != 0)
+		return error;
+
+	error = clock_getres1(clockid, &ts);
+	if (error != 0)
+		return error;
+
+	error = convert_timespec_to_timestamp(&ts, &cts);
+	if (error != 0)
+		return error;
+	retval[0] = cts;
+	return (0);
 }
 
 int
 cloudabi_sys_clock_time_get(struct lwp *l,
     const struct cloudabi_sys_clock_time_get_args *uap, register_t *retval)
 {
+	struct timespec ts;
+	cloudabi_timestamp_t cts;
+	int error;
+	clockid_t clockid;
 
-	return (ENOSYS);
+	error = convert_clockid(SCARG(uap, clock_id), &clockid);
+	if (error != 0)
+		return (error);
+
+	error = clock_gettime1(clockid, &ts);
+	if (error != 0)
+		return (error);
+
+	error = convert_timespec_to_timestamp(&ts, &cts);
+	if (error != 0)
+		return error;
+	retval[0] = cts;
+	return (0);
 }
