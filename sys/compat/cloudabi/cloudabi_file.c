@@ -409,8 +409,29 @@ int
 cloudabi_sys_file_stat_fput(struct lwp *l,
     const struct cloudabi_sys_file_stat_fput_args *uap, register_t *retval)
 {
+	cloudabi_filestat_t fs;
+	int error;
 
-	return (ENOSYS);
+	error = copyin(SCARG(uap, buf), &fs, sizeof(fs));
+	if (error != 0)
+		return (error);
+
+	if ((SCARG(uap, flags) & CLOUDABI_FILESTAT_SIZE) != 0) {
+		struct sys_ftruncate_args sys_ftruncate_args;
+
+		if ((SCARG(uap, flags) & ~CLOUDABI_FILESTAT_SIZE) != 0)
+			return (EINVAL);
+
+		SCARG(&sys_ftruncate_args, fd) = SCARG(uap, fd);
+		SCARG(&sys_ftruncate_args, length) = fs.st_size;
+		return (sys_ftruncate(l, &sys_ftruncate_args, retval));
+	} else if ((SCARG(uap, flags) & (CLOUDABI_FILESTAT_ATIM |
+	    CLOUDABI_FILESTAT_ATIM_NOW | CLOUDABI_FILESTAT_MTIM |
+	    CLOUDABI_FILESTAT_MTIM_NOW)) != 0) {
+		/* TODO(ed): Implement. */
+		return (ENOSYS);
+	}
+	return (EINVAL);
 }
 
 int
