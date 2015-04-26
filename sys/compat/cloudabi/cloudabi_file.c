@@ -30,6 +30,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/namei.h>
+#include <sys/syscallargs.h>
 #include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
@@ -58,16 +59,45 @@ int
 cloudabi_sys_file_advise(struct lwp *l,
     const struct cloudabi_sys_file_advise_args *uap, register_t *retval)
 {
+	int advice;
 
-	return (ENOSYS);
+	switch (SCARG(uap, advice)) {
+	case CLOUDABI_ADVICE_DONTNEED:
+		advice = POSIX_FADV_DONTNEED;
+		break;
+	case CLOUDABI_ADVICE_NOREUSE:
+		advice = POSIX_FADV_NOREUSE;
+		break;
+	case CLOUDABI_ADVICE_NORMAL:
+		advice = POSIX_FADV_NORMAL;
+		break;
+	case CLOUDABI_ADVICE_RANDOM:
+		advice = POSIX_FADV_RANDOM;
+		break;
+	case CLOUDABI_ADVICE_SEQUENTIAL:
+		advice = POSIX_FADV_SEQUENTIAL;
+		break;
+	case CLOUDABI_ADVICE_WILLNEED:
+		advice = POSIX_FADV_WILLNEED;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	return (do_posix_fadvise(SCARG(uap, fd), SCARG(uap, offset),
+	    SCARG(uap, len), advice));
 }
 
 int
 cloudabi_sys_file_allocate(struct lwp *l,
      const struct cloudabi_sys_file_allocate_args *uap, register_t *retval)
 {
+	struct sys_posix_fallocate_args sys_posix_fallocate_args;
 
-	return (ENOSYS);
+	SCARG(&sys_posix_fallocate_args, fd) = SCARG(uap, fd);
+	SCARG(&sys_posix_fallocate_args, pos) = SCARG(uap, offset);
+	SCARG(&sys_posix_fallocate_args, len) = SCARG(uap, len);
+	return (sys_posix_fallocate(l, &sys_posix_fallocate_args, retval));
 }
 
 int
