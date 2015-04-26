@@ -264,8 +264,57 @@ int
 cloudabi_sys_file_readlink(struct lwp *l,
     const struct cloudabi_sys_file_readlink_args *uap, register_t *retval)
 {
+	struct iovec iov;
+	struct nameidata nd;
+	struct uio uio;
+	struct vnode *vp;
+	struct pathbuf *pb;
+	int error;
 
-	return (ENOSYS);
+	/* Copy in pathname. */
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error)
+		return (error);
+
+	/* Look up symbolic link. */
+	CLOUDABI_NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	if (error != 0) {
+		pathbuf_destroy(pb);
+		return (error);
+	}
+	vp = nd.ni_vp;
+	pathbuf_destroy(pb);
+
+	/* Validate file type. */
+	if (vp->v_type != VLNK) {
+		error = EINVAL;
+		goto out;
+	}
+
+	/* Respect filesystem permissions if mount option "symperm" is set. */
+	if ((vp->v_mount->mnt_flag & MNT_SYMPERM) != 0) {
+		error = VOP_ACCESS(vp, VREAD, l->l_cred);
+		if (error != 0)
+			goto out;
+	}
+
+	/* Read symbolic link contents. */
+	iov.iov_base = SCARG(uap, buf);
+	iov.iov_len = SCARG(uap, bufsize);
+	uio.uio_iov = &iov;
+	uio.uio_iovcnt = 1;
+	uio.uio_offset = 0;
+	uio.uio_rw = UIO_READ;
+	KASSERT(l == curlwp);
+	uio.uio_vmspace = l->l_proc->p_vmspace;
+	uio.uio_resid = SCARG(uap, bufsize);
+	error = VOP_READLINK(vp, &uio, l->l_cred);
+	retval[0] = SCARG(uap, bufsize) - uio.uio_resid;
+out:
+	vput(vp);
+	return (error);
 }
 
 int
