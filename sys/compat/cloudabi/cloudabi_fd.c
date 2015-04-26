@@ -28,9 +28,13 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/socketvar.h>
+#include <sys/stat.h>
 #include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+#include <compat/cloudabi/cloudabi_util.h>
 
 int
 cloudabi_sys_fd_close(struct lwp *l,
@@ -158,6 +162,52 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
 	}
 
 	return (sys_lseek(l, &sys_lseek_args, retval));
+}
+
+/*
+ * Converts a mode_t and an optional file descriptor to a CloudABI file
+ * descriptor type.
+ */
+cloudabi_filetype_t
+cloudabi_convert_filetype(const struct file *fp, mode_t mode)
+{
+	struct socket *so;
+
+	/* Infer type from file descriptor if provided. */
+	if (fp != NULL) {
+		if (fp->f_type == DTYPE_KQUEUE)
+			return (CLOUDABI_FILETYPE_POLL);
+		else if (fp->f_type == DTYPE_SOCKET) {
+			so = fp->f_socket;
+			switch (so->so_type) {
+			case SOCK_DGRAM:
+				return (CLOUDABI_FILETYPE_SOCKET_DGRAM);
+			case SOCK_SEQPACKET:
+				return (CLOUDABI_FILETYPE_SOCKET_SEQPACKET);
+			default:
+				return (CLOUDABI_FILETYPE_SOCKET_STREAM);
+			}
+		}
+	}
+
+	/* Infer type from stat mode. */
+	if (S_ISBLK(mode))
+		return (CLOUDABI_FILETYPE_BLOCK_DEVICE);
+	else if (S_ISCHR(mode))
+		return (CLOUDABI_FILETYPE_CHARACTER_DEVICE);
+	else if (S_ISDIR(mode))
+		return (CLOUDABI_FILETYPE_DIRECTORY);
+	else if (S_ISFIFO(mode))
+		return (CLOUDABI_FILETYPE_FIFO);
+	else if (S_ISREG(mode))
+		return (CLOUDABI_FILETYPE_REGULAR_FILE);
+	else if (S_ISSOCK(mode)) {
+		/* Inaccurate, but the best that we can do. */
+		return (CLOUDABI_FILETYPE_SOCKET_STREAM);
+	} else if (S_ISLNK(mode))
+		return (CLOUDABI_FILETYPE_SYMBOLIC_LINK);
+
+	return (CLOUDABI_FILETYPE_UNKNOWN);
 }
 
 int

@@ -34,6 +34,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+#include <compat/cloudabi/cloudabi_util.h>
 
 #define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
 /* TODO(ed): Limit lookup to local directory. */
@@ -325,12 +326,71 @@ cloudabi_sys_file_rename(struct lwp *l,
 	return (ENOSYS);
 }
 
+#define NSEC_PER_SEC 1000000000
+
+/* Converts a struct timespec to a timestamp in nanoseconds since the Epoch. */
+static cloudabi_timestamp_t
+convert_timestamp(const struct timespec *ts)
+{
+	cloudabi_timestamp_t s, ns;
+
+	/* Timestamps from before the Epoch cannot be expressed. */
+	if (ts->tv_sec < 0)
+		return (0);
+
+	s = ts->tv_sec;
+	ns = ts->tv_nsec;
+	if (s > UINT64_MAX / NSEC_PER_SEC || (s == UINT64_MAX / NSEC_PER_SEC &&
+	    ns > UINT64_MAX % NSEC_PER_SEC)) {
+		/* Addition of seconds would cause an overflow. */
+		ns = UINT64_MAX;
+	} else {
+		ns += s * NSEC_PER_SEC;
+	}
+	return (ns);
+}
+
+/* Converts a NetBSD stat structure to a CloudABI stat structure. */
+static void
+convert_stat(struct file *fp, const struct stat *sb, cloudabi_filestat_t *csb)
+{
+	cloudabi_filestat_t res = {
+		.st_dev		= sb->st_dev,
+		.st_ino		= sb->st_ino,
+		.st_nlink	= sb->st_nlink,
+		.st_size	= sb->st_size,
+		.st_atim	= convert_timestamp(&sb->st_atim),
+		.st_mtim	= convert_timestamp(&sb->st_mtim),
+		.st_ctim	= convert_timestamp(&sb->st_ctim),
+		.st_filetype	= cloudabi_convert_filetype(fp, sb->st_mode),
+	};
+
+	*csb = res;
+}
+
 int
 cloudabi_sys_file_stat_fget(struct lwp *l,
     const struct cloudabi_sys_file_stat_fget_args *uap, register_t *retval)
 {
+	struct stat sb;
+	cloudabi_filestat_t csb;
+	struct file *fp;
+	int error;
 
-	return (ENOSYS);
+	fp = fd_getfile(SCARG(uap, fd));
+	if (fp == NULL)
+		return (EBADF);
+
+	error = fp->f_ops->fo_stat(fp, &sb);
+	if (error != 0) {
+		fd_putfile(SCARG(uap, fd));
+		return (error);
+	}
+
+	/* Convert results and return them. */
+	convert_stat(fp, &sb, &csb);
+	fd_putfile(SCARG(uap, fd));
+	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
 
 int

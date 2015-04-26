@@ -35,6 +35,12 @@ struct lwp;
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
 
+/*
+ * Converts a mode_t and an optional file descriptor to a CloudABI file
+ * descriptor type.
+ */
+cloudabi_filetype_t cloudabi_convert_filetype(const struct file *, mode_t);
+
 /* Initialization of the futex pool. */
 void cloudabi_futex_init(void);
 void cloudabi_futex_destroy(void);
