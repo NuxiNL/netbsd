@@ -109,18 +109,27 @@ cloudabi_sys_file_create(struct lwp *l,
 	struct vattr vattr;
 	struct pathbuf *pb;
 	struct vnode *vp;
+	enum vtype type;
 	int error;
 
-	/* TODO(ed): Also support the creation of fifos. */
-	if (SCARG(uap, type) != CLOUDABI_FILETYPE_DIRECTORY)
+	switch (SCARG(uap, type)) {
+	case CLOUDABI_FILETYPE_DIRECTORY:
+		type = VDIR;
+		break;
+	case CLOUDABI_FILETYPE_FIFO:
+		type = VFIFO;
+		break;
+	default:
 		return (EINVAL);
+	}
 
 	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
 	    &pb);
 	if (error != 0)
 		return (error);
 
-	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT | CREATEDIR, pb);
+	CLOUDABI_NDINIT(&nd, CREATE,
+	    LOCKPARENT | (type == VDIR ? CREATEDIR : 0), pb);
 	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
 	if (error != 0) {
 		pathbuf_destroy(pb);
@@ -138,9 +147,12 @@ cloudabi_sys_file_create(struct lwp *l,
 		return (EEXIST);
 	}
 	vattr_null(&vattr);
-	vattr.va_type = VDIR;
+	vattr.va_type = type;
 	vattr.va_mode = CLOUDABI_MODE(l);
-	error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
+	if (type == VDIR)
+		error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
+	else
+		error = VOP_MKNOD(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
 	if (error == 0)
 		vrele(nd.ni_vp);
 	vput(nd.ni_dvp);
