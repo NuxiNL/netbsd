@@ -417,8 +417,30 @@ int
 cloudabi_sys_file_stat_get(struct lwp *l,
     const struct cloudabi_sys_file_stat_get_args *uap, register_t *retval)
 {
+	struct nameidata nd;
+	struct stat sb;
+	cloudabi_filestat_t csb;
+	struct pathbuf *pb;
+	int error;
 
-	return (ENOSYS);
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error != 0)
+		return (error);
+
+	CLOUDABI_NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	pathbuf_destroy(pb);
+	if (error != 0)
+		return (error);
+
+	error = vn_stat(nd.ni_vp, &sb);
+	vput(nd.ni_vp);
+	if (error != 0)
+		return (error);
+
+	convert_stat(NULL, &sb, &csb);
+	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
 
 int
