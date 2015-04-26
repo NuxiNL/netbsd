@@ -34,6 +34,11 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
+#define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
+/* TODO(ed): Limit lookup to local directory. */
+#define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
+	NDINIT(ndp, op, (flags) | 0, pathbuf)
+
 static int
 cloudabi_namei(struct lwp *l, int fdat, struct nameidata *ndp)
 {
@@ -84,8 +89,7 @@ cloudabi_sys_file_create(struct lwp *l,
 	if (error != 0)
 		return (error);
 
-	/* TODO(ed): Limit lookup to local directory. */
-	NDINIT(&nd, CREATE, LOCKPARENT | CREATEDIR, pb);
+	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT | CREATEDIR, pb);
 	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
 	if (error != 0) {
 		pathbuf_destroy(pb);
@@ -104,7 +108,7 @@ cloudabi_sys_file_create(struct lwp *l,
 	}
 	vattr_null(&vattr);
 	vattr.va_type = VDIR;
-	vattr.va_mode = 0777 & ~l->l_proc->p_cwdi->cwdi_cmask;
+	vattr.va_mode = CLOUDABI_MODE(l);
 	error = VOP_MKDIR(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
 	if (error == 0)
 		vrele(nd.ni_vp);
@@ -125,8 +129,54 @@ int
 cloudabi_sys_file_open(struct lwp *l,
     const struct cloudabi_sys_file_open_args *uap, register_t *retval)
 {
+	struct nameidata nd;
+	file_t *dfp, *fp;
+	struct pathbuf *pb;
+	struct proc *p = l->l_proc;
+	int error, fd;
 
-	return (ENOSYS);
+	/* TODO(ed): Properly compute the access mode. */
+	int flags = FREAD;
+
+	/* Copy in the pathname. */
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error != 0)
+		return (error);
+
+	/* Obtain the directory from where to do the lookup. */
+	error = fd_getvnode(SCARG(uap, fd), &dfp);
+	if (error != 0)
+		goto out1;
+
+	/* Allocate a new file descriptor. */
+	error = fd_allocfile(&fp, &fd);
+	if (error != 0)
+		goto out2;
+
+	/* Attempt to open the file. */
+	CLOUDABI_NDINIT(&nd, LOOKUP, FOLLOW, pb);
+	NDAT(&nd, dfp->f_vnode);
+	error = vn_open(&nd, flags, CLOUDABI_MODE(l));
+	if (error != 0) {
+		fd_abort(p, fp, fd);
+		goto out2;
+	}
+
+	/* Initialize the new file descriptor. */
+	fp->f_flag = flags & FMASK;
+	fp->f_type = DTYPE_VNODE;
+	fp->f_ops = &vnops;
+	fp->f_vnode = nd.ni_vp;
+
+	VOP_UNLOCK(nd.ni_vp);
+	retval[0] = fd;
+	fd_affix(p, fp, fd);
+out2:
+	fd_putfile(SCARG(uap, fd));
+out1:
+	pathbuf_destroy(pb);
+	return (error);
 }
 
 int
@@ -189,31 +239,34 @@ int
 cloudabi_sys_file_symlink(struct lwp *l,
     const struct cloudabi_sys_file_symlink_args *uap, register_t *retval)
 {
+	struct nameidata nd;
 	struct vattr vattr;
+	struct pathbuf *linkpb;
 	char *path;
 	int error;
-	struct pathbuf *linkpb;
-	struct nameidata nd;
 
-	if (SCARG(uap, path2len) >= MAXPATHLEN)
+	if (SCARG(uap, path1len) >= MAXPATHLEN)
 		return (ENAMETOOLONG);
 
 	/* Copy in pathnames. */
-	path = PNBUF_GET();
-	error = copyin(SCARG(uap, path2), path, SCARG(uap, path2len));
-	if (error != 0)
-		goto out1;
-	path[SCARG(uap, path2len)] = '\0';
-	error = pathbuf_copyin_length(SCARG(uap, path1), SCARG(uap, path1len),
+	error = pathbuf_copyin_length(SCARG(uap, path2), SCARG(uap, path2len),
 	    &linkpb);
 	if (error != 0)
-		goto out1;
+		return (error);
+	path = PNBUF_GET();
+	error = copyin(SCARG(uap, path1), path, SCARG(uap, path1len));
+	if (error != 0)
+		goto out;
+	if (memchr(path, '\0', SCARG(uap, path1len)) != NULL) {
+		error = EINVAL;
+		goto out;
+	}
+	path[SCARG(uap, path1len)] = '\0';
 
-	/* TODO(ed): Limit lookup to local directory. */
-	NDINIT(&nd, CREATE, LOCKPARENT, linkpb);
+	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT, linkpb);
 	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
 	if (error != 0)
-		goto out2;
+		goto out;
 	if (nd.ni_vp) {
 		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
 		if (nd.ni_dvp == nd.ni_vp)
@@ -222,19 +275,18 @@ cloudabi_sys_file_symlink(struct lwp *l,
 			vput(nd.ni_dvp);
 		vrele(nd.ni_vp);
 		error = EEXIST;
-		goto out2;
+		goto out;
 	}
 	vattr_null(&vattr);
 	vattr.va_type = VLNK;
-	vattr.va_mode = 0777 & ~l->l_proc->p_cwdi->cwdi_cmask;
+	vattr.va_mode = CLOUDABI_MODE(l);
 	error = VOP_SYMLINK(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr, path);
 	if (error == 0)
 		vrele(nd.ni_vp);
 	vput(nd.ni_dvp);
-out2:
-	pathbuf_destroy(linkpb);
-out1:
+out:
 	PNBUF_PUT(path);
+	pathbuf_destroy(linkpb);
 	return (error);
 }
 
