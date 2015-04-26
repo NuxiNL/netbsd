@@ -228,8 +228,36 @@ int
 cloudabi_sys_fd_stat_put(struct lwp *l,
     const struct cloudabi_sys_fd_stat_put_args *uap, register_t *retval)
 {
+	cloudabi_fdstat_t fsb;
+	int error;
 
-	return (ENOSYS);
+	error = copyin(SCARG(uap, buf), &fsb, sizeof(fsb));
+	if (error != 0)
+		return (error);
+
+	if (SCARG(uap, flags) == CLOUDABI_FDSTAT_FLAGS) {
+		struct sys_fcntl_args sys_fcntl_args;
+		intptr_t oflags;
+
+		/* Convert flags. */
+		SCARG(&sys_fcntl_args, fd) = SCARG(uap, fd);
+		SCARG(&sys_fcntl_args, cmd) = F_SETFL;
+		oflags = 0;
+		if (fsb.fs_flags & CLOUDABI_FDFLAG_APPEND)
+			oflags |= O_APPEND;
+		if (fsb.fs_flags & CLOUDABI_FDFLAG_NONBLOCK)
+			oflags |= O_NONBLOCK;
+		if (fsb.fs_flags & (CLOUDABI_FDFLAG_SYNC |
+		    CLOUDABI_FDFLAG_DSYNC | CLOUDABI_FDFLAG_RSYNC))
+			oflags |= O_SYNC;
+		SCARG(&sys_fcntl_args, arg) = (void *)oflags;;
+
+		return (sys_fcntl(l, &sys_fcntl_args, retval));
+	} else if (SCARG(uap, flags) == CLOUDABI_FDSTAT_RIGHTS) {
+		/* TODO(ed): Implement. */
+		return (ENOSYS);
+	}
+	return (EINVAL);
 }
 
 int
