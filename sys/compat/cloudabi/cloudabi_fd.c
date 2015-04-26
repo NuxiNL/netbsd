@@ -122,8 +122,14 @@ int
 cloudabi_sys_fd_stat_get(struct lwp *l,
     const struct cloudabi_sys_fd_stat_get_args *uap, register_t *retval)
 {
+	cloudabi_fdstat_t fds = {
+		.fs_filetype		= CLOUDABI_FILETYPE_DIRECTORY,
+		.fs_rights_base		= ~0,
+		.fs_rights_inheriting	= ~0,
+	};
 
-	return (ENOSYS);
+	/* TODO(ed): Implement. */
+	return (copyout(&fds, SCARG(uap, buf), sizeof(fds)));
 }
 
 int
