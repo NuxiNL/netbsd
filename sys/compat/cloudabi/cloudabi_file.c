@@ -98,7 +98,8 @@ cloudabi_sys_file_allocate(struct lwp *l,
 	SCARG(&sys_posix_fallocate_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_posix_fallocate_args, pos) = SCARG(uap, offset);
 	SCARG(&sys_posix_fallocate_args, len) = SCARG(uap, len);
-	return (sys_posix_fallocate(l, &sys_posix_fallocate_args, retval));
+	sys_posix_fallocate(l, &sys_posix_fallocate_args, retval);
+	return (retval[0]);
 }
 
 int
