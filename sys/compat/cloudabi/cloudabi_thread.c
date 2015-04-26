@@ -27,6 +27,8 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/lwp.h>
+#include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
@@ -34,13 +36,20 @@ int
 cloudabi_sys_thread_exit(struct lwp *l,
     const struct cloudabi_sys_thread_exit_args *uap, register_t *retval)
 {
+	struct cloudabi_sys_lock_unlock_args cloudabi_sys_lock_unlock_args;
 
-	return (ENOSYS);
+        /* Wake up joining thread. */
+	SCARG(&cloudabi_sys_lock_unlock_args, lock) = SCARG(uap, lock);
+	cloudabi_sys_lock_unlock(l, &cloudabi_sys_lock_unlock_args, retval);
+
+        /* Terminate thread. */
+	lwp_exit(l);
+	return (0);
 }
 
 int
 cloudabi_sys_thread_yield(struct lwp *l, const void *uap, register_t *retval)
 {
 
-	return (ENOSYS);
+	return (sys_sched_yield(l, NULL, retval));
 }
