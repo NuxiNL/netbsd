@@ -114,8 +114,8 @@ cloudabi_convert_errno(int error)
 
 	/* Unknown error: return ENOSYS for now. */
 	if (error < 0 || error >= __arraycount(table))
-		return (ENOSYS);
+		return (CLOUDABI_ENOSYS);
 	if (table[error] == 0)
-		return (error == 0 ? 0 : ENOSYS);
+		return (error == 0 ? 0 : CLOUDABI_ENOSYS);
 	return (table[error]);
 }
