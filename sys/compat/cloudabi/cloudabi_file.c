@@ -244,8 +244,11 @@ cloudabi_sys_file_open(struct lwp *l,
 
 	/* Obtain the directory from where to do the lookup. */
 	error = fd_getvnode(SCARG(uap, fd), &dfp);
-	if (error != 0)
+	if (error != 0) {
+		if (error == EINVAL)
+			error = ENOTDIR;
 		goto out1;
+	}
 
 	/* Allocate a new file descriptor. */
 	error = fd_allocfile(&fp, &fd);
