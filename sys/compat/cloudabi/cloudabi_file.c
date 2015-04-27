@@ -50,7 +50,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
 /* TODO(ed): Limit lookup to local directory. */
 #define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
-	NDINIT(ndp, op, (flags) | 0, pathbuf)
+	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
 static int
 cloudabi_namei(struct lwp *l, int fdat, struct nameidata *ndp)

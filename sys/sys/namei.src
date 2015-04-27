@@ -154,6 +154,7 @@ NAMEIFL	EMULROOTSET	0x00000080	/* emulation root already
 					   in ni_erootdir */
 NAMEIFL	NOCHROOT	0x01000000	/* no chroot on abs path lookups */
 NAMEIFL	MODMASK		0x010000fc	/* mask of operational modifiers */
+NAMEIFL	SANDBOXINDIR	0x10000000	/* Capsicum-style sandboxing */
 /*
  * Namei parameter descriptors.
  */

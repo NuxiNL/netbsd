@@ -162,6 +162,7 @@ struct nameidata {
 					   in ni_erootdir */
 #define	NOCHROOT	0x01000000	/* no chroot on abs path lookups */
 #define	MODMASK		0x010000fc	/* mask of operational modifiers */
+#define	SANDBOXINDIR	0x10000000	/* Capsicum-style sandboxing */
 /*
  * Namei parameter descriptors.
  */
@@ -346,6 +347,7 @@ struct	nchstats _NAMEI_CACHE_STATS(uint64_t);
 #define NAMEI_EMULROOTSET	0x00000080
 #define NAMEI_NOCHROOT	0x01000000
 #define NAMEI_MODMASK	0x010000fc
+#define NAMEI_SANDBOXINDIR	0x10000000
 #define NAMEI_NOCROSSMOUNT	0x0000100
 #define NAMEI_RDONLY	0x0000200
 #define NAMEI_ISDOTDOT	0x0002000

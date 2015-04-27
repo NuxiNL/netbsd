@@ -138,5 +138,6 @@ const int native_to_linux_errno[] = {
 	LINUX_SCERR_SIGN LINUX_EMULTIHOP,
 	LINUX_SCERR_SIGN LINUX_ENOLINK,
 	LINUX_SCERR_SIGN LINUX_EPROTO,		/* 96 */
+	LINUX_SCERR_SIGN LINUX_ENOSYS,		/* not mapped (ENOTCAPABLE) */
 };
 __CTASSERT(__arraycount(native_to_linux_errno) == ELAST + 1);

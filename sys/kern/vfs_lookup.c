@@ -567,7 +567,9 @@ namei_getstartdir(struct namei_state *state)
 	rw_enter(&cwdi->cwdi_lock, RW_READER);
 
 	/* root dir */
-	if (cwdi->cwdi_rdir == NULL || (cnp->cn_flags & NOCHROOT)) {
+	if (cnp->cn_flags & SANDBOXINDIR) {
+		rootdir = ndp->ni_atdir;
+	} else if (cwdi->cwdi_rdir == NULL || (cnp->cn_flags & NOCHROOT)) {
 		rootdir = rootvnode;
 	} else {
 		rootdir = cwdi->cwdi_rdir;
@@ -682,7 +684,12 @@ namei_start(struct namei_state *state, int isnfsd,
 	    struct vnode **startdir_ret)
 {
 	struct nameidata *ndp = state->ndp;
+	struct componentname *cnp = state->cnp;
 	struct vnode *startdir;
+
+	/* Absolute paths are not permitted when sandboxed. */
+	if (cnp->cn_flags & SANDBOXINDIR && ndp->ni_pnbuf[0] == '/')
+		return (ENOTCAPABLE);
 
 	/* length includes null terminator (was originally from copyinstr) */
 	ndp->ni_pathlen = strlen(ndp->ni_pnbuf) + 1;
@@ -802,6 +809,10 @@ namei_follow(struct namei_state *state, int inhibitmagic,
 	ndp->ni_pathlen += linklen;
 	memcpy(ndp->ni_pnbuf, cp, ndp->ni_pathlen);
 	PNBUF_PUT(cp);
+
+	/* Absolute paths are not permitted when sandboxed. */
+	if (cnp->cn_flags & SANDBOXINDIR && ndp->ni_pnbuf[0] == '/')
+		return (ENOTCAPABLE);
 
 	/* we're now starting from the beginning of the buffer again */
 	cnp->cn_nameptr = ndp->ni_pnbuf;
@@ -963,7 +974,9 @@ lookup_once(struct namei_state *state,
 				foundobj = searchdir;
 				vref(foundobj);
 				*foundobj_ret = foundobj;
-				error = 0;
+				/* ".." outside of the current directory. */
+				error = cnp->cn_flags & SANDBOXINDIR ?
+				    ENOTCAPABLE : 0;
 				goto done;
 			}
 			if (ndp->ni_rootdir != rootvnode) {

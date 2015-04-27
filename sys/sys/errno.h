@@ -172,7 +172,10 @@
 #define	ENOLINK		95		/* Link has been severed */
 #define	EPROTO		96		/* Protocol error */
 
-#define	ELAST		96		/* Must equal largest errno */
+/* Capsicum. */
+#define	ENOTCAPABLE	97		/* Capability missing */
+
+#define	ELAST		97		/* Must equal largest errno */
 
 #if defined(_KERNEL) || defined(_KMEMUSER)
 /* pseudo-errors returned inside kernel to modify return to process */
