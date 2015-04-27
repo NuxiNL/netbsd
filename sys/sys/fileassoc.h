@@ -33,6 +33,9 @@
 #include <sys/cdefs.h>
 #include <sys/param.h>
 
+struct mount;
+struct vnode;
+
 typedef struct fileassoc *fileassoc_t;
 typedef void (*fileassoc_cleanup_cb_t)(void *);
 typedef void (*fileassoc_cb_t)(void *, void *);
