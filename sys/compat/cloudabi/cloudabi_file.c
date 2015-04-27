@@ -26,11 +26,22 @@
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD$");
 
+#ifdef _KERNEL_OPT
+#include "opt_fileassoc.h"
+#include "veriexec.h"
+#endif
+
 #include <sys/param.h>
 #include <sys/file.h>
+#ifdef FILEASSOC
+#include <sys/fileassoc.h>
+#endif
 #include <sys/filedesc.h>
 #include <sys/namei.h>
 #include <sys/syscallargs.h>
+#if NVERIEXEC > 0
+#include <sys/verified_exec.h>
+#endif
 #include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
@@ -532,6 +543,79 @@ int
 cloudabi_sys_file_unlink(struct lwp *l,
     const struct cloudabi_sys_file_unlink_args *uap, register_t *retval)
 {
+	struct nameidata nd;
+	struct pathbuf *pb;
+	struct vnode *vp;
+	const char *pathstring;
+	int error;
 
-	return (ENOSYS);
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error != 0)
+		return (error);
+	pathstring = pathbuf_stringcopy_get(pb);
+	if (pathstring == NULL) {
+		pathbuf_destroy(pb);
+		return (ENOMEM);
+	}
+
+	CLOUDABI_NDINIT(&nd, DELETE, LOCKPARENT | LOCKLEAF, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	if (error != 0)
+		goto out;
+	vp = nd.ni_vp;
+
+	/* The root of a mounted filesystem cannot be deleted. */
+	if ((vp->v_vflag & VV_ROOT) != 0 ||
+	    (vp->v_type == VDIR && vp->v_mountedhere != NULL)) {
+		error = EBUSY;
+		goto abort;
+	}
+	/* No rmdir "." please. */
+	if (nd.ni_dvp == vp) {
+		error = EINVAL;
+		goto abort;
+	}
+
+	/* AT_REMOVEDIR is required to remove a directory. */
+	if (vp->v_type == VDIR) {
+		if ((SCARG(uap, flag) & CLOUDABI_UNLINK_REMOVEDIR) == 0) {
+			error = EPERM;
+			goto abort;
+		} else {
+			error = VOP_RMDIR(nd.ni_dvp, nd.ni_vp, &nd.ni_cnd);
+			goto out;
+		}
+	}
+
+	/* Starting here we only deal with non directories. */
+	if ((SCARG(uap, flag) & CLOUDABI_UNLINK_REMOVEDIR) != 0) {
+		error = ENOTDIR;
+		goto abort;
+	}
+
+#if NVERIEXEC > 0
+	/* Handle remove requests for veriexec entries. */
+	error = veriexec_removechk(curlwp, nd.ni_vp, pathstring);
+	if (error != 0)
+		goto abort;
+#endif
+#ifdef FILEASSOC
+	fileassoc_file_delete(vp);
+#endif
+	error = VOP_REMOVE(nd.ni_dvp, nd.ni_vp, &nd.ni_cnd);
+	goto out;
+
+abort:
+	VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
+	if (nd.ni_dvp == vp)
+		vrele(nd.ni_dvp);
+	else
+		vput(nd.ni_dvp);
+	vput(vp);
+
+out:
+	pathbuf_stringcopy_put(pb, pathstring);
+	pathbuf_destroy(pb);
+	return (error);
 }
