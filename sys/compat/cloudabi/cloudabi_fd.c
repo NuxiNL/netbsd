@@ -29,12 +29,16 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/param.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
+#include <sys/filedesc.h>
+#include <sys/proc.h>
 #include <sys/socketvar.h>
 #include <sys/stat.h>
 #include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_util.h>
+
+extern const struct fileops socketops;
 
 int
 cloudabi_sys_fd_close(struct lwp *l,
@@ -78,11 +82,65 @@ cloudabi_sys_fd_create1(struct lwp *l,
 }
 
 static int
+makesocket(struct lwp *l, file_t **fp, int *fd, int domain, struct socket *soo)
+{
+	struct socket *so;
+	int error;
+
+	error = socreate(domain, &so, AF_UNIX, 0, l, soo);
+	if (error != 0)
+		return (error);
+	error = fd_allocfile(fp, fd);
+	if (error != 0) {
+		soclose(so);
+		return (error);
+	}
+	(*fp)->f_flag = FREAD | FWRITE | FNOSIGPIPE;
+	(*fp)->f_type = DTYPE_SOCKET;
+	(*fp)->f_ops = &socketops;
+	(*fp)->f_socket = so;
+	return (0);
+}
+
+static int
 create_socketpair(struct lwp *l, int type, register_t *retval)
 {
+	file_t *fp1, *fp2;
+	proc_t *p = l->l_proc;
+	struct socket *so1, *so2;
+	int fd, error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	error = makesocket(l, &fp1, &fd, type, NULL);
+	if (error)
+		return (error);
+	so1 = fp1->f_socket;
+	retval[0] = fd;
+
+	error = makesocket(l, &fp2, &fd, type, so1);
+	if (error)
+		goto out1;
+	so2 = fp2->f_socket;
+	retval[1] = fd;
+
+	solock(so1);
+	error = soconnect2(so1, so2);
+	/* Datagram socket connection is asymmetric. */
+	if (error == 0 && type == SOCK_DGRAM)
+		error = soconnect2(so2, so1);
+	sounlock(so1);
+	if (error != 0)
+		goto out2;
+
+	fd_affix(p, fp1, retval[0]);
+	fd_affix(p, fp2, retval[1]);
+	return (0);
+out2:
+	fd_abort(p, fp2, retval[1]);
+	soclose(so2);
+out1:
+	fd_abort(p, fp1, retval[0]);
+	soclose(so1);
+	return (error);
 }
 
 int
@@ -214,14 +272,34 @@ int
 cloudabi_sys_fd_stat_get(struct lwp *l,
     const struct cloudabi_sys_fd_stat_get_args *uap, register_t *retval)
 {
-	cloudabi_fdstat_t fds = {
+	cloudabi_fdstat_t fsb = {
 		.fs_filetype		= CLOUDABI_FILETYPE_DIRECTORY,
 		.fs_rights_base		= ~0,
 		.fs_rights_inheriting	= ~0,
 	};
+	file_t *fp;
+	int oflags;
 
-	/* TODO(ed): Implement. */
-	return (copyout(&fds, SCARG(uap, buf), sizeof(fds)));
+	fp = fd_getfile(SCARG(uap, fd));
+	if (fp == NULL)
+		return (EBADF);
+	oflags = OFLAGS(fp->f_flag);
+	fd_putfile(SCARG(uap, fd));
+
+	/* Convert file descriptor flags. */
+	if (oflags & O_APPEND)
+		fsb.fs_flags |= CLOUDABI_FDFLAG_APPEND;
+	if (oflags & O_DSYNC)
+		fsb.fs_flags |= CLOUDABI_FDFLAG_DSYNC;
+	if (oflags & O_NONBLOCK)
+		fsb.fs_flags |= CLOUDABI_FDFLAG_NONBLOCK;
+	if (oflags & O_RSYNC)
+		fsb.fs_flags |= CLOUDABI_FDFLAG_RSYNC;
+	if (oflags & O_SYNC)
+		fsb.fs_flags |= CLOUDABI_FDFLAG_SYNC;
+
+	/* TODO(ed): Fix filetype and rights. */
+	return (copyout(&fsb, SCARG(uap, buf), sizeof(fsb)));
 }
 
 int
