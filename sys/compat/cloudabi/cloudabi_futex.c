@@ -28,9 +28,13 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/malloc.h>
+#include <sys/mman.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+
+#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
@@ -91,9 +95,14 @@ struct futex_queue;
 struct futex_waiter;
 
 /* Identifier of a location in memory. */
-/* TODO(ed): Fix process-shared locks. */
 struct futex_address {
-	const void *			fa_object;
+	/* If process-local: address space of the process. */
+	struct vmspace *		fa_vmspace;
+	/* If not process-local: VM object containing the object. */
+	struct uvm_object *		fa_vmobject;
+
+	/* Memory address within address space or offset within VM object. */
+	uintptr_t			fa_offset;
 };
 
 /* A set of waiting threads. */
@@ -205,14 +214,47 @@ static int
 futex_address_create(struct futex_address *fa, struct lwp *l,
     const void *object)
 {
+	struct uvm_object *vo;
+	struct vmspace *vs;
+	struct vm_map *map;
+	struct vm_map_entry *entry;
 
-	fa->fa_object = object;
+	vs = l->l_proc->p_vmspace;
+	map = &vs->vm_map;
+
+	vm_map_lock(map);
+	if (!uvm_map_lookup_entry(map, (vaddr_t)object, &entry)) {
+		vm_map_unlock(map);
+		return (EFAULT);
+	}
+
+	if (entry->inheritance == MAP_INHERIT_SHARE) {
+		/* Address corresponds with shared mapping. */
+		KASSERT(UVM_ET_ISOBJ(entry));
+		vo = entry->object.uvm_obj;
+		fa->fa_vmspace = NULL;
+		fa->fa_vmobject = vo;
+		vo->pgops->pgo_reference(vo);
+		fa->fa_offset = entry->offset - entry->start + (vaddr_t)object;
+	} else {
+		/* Address corresponds with process-local mapping. */
+		fa->fa_vmspace = vs;
+		fa->fa_vmobject = NULL;
+		fa->fa_offset = (uintptr_t)object;
+	}
+
+	vm_map_unlock(map);
 	return (0);
 }
 
 static void
 futex_address_free(struct futex_address *fa)
 {
+	struct uvm_object *vo;
+
+	vo = fa->fa_vmobject;
+	if (vo != NULL)
+		vo->pgops->pgo_detach(vo);
 }
 
 static bool
@@ -220,7 +262,9 @@ futex_address_match(const struct futex_address *fa1,
     const struct futex_address *fa2)
 {
 
-	return (fa1->fa_object == fa2->fa_object);
+	return (fa1->fa_vmspace == fa2->fa_vmspace &&
+	    fa1->fa_vmobject == fa2->fa_vmobject &&
+	    fa1->fa_offset == fa2->fa_offset);
 }
 
 /*
