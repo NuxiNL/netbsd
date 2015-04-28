@@ -152,7 +152,7 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	if ((fmode & (O_CREAT | O_DIRECTORY)) == (O_CREAT | O_DIRECTORY))
 		return EINVAL;
 
-	ndp->ni_cnd.cn_flags &= TRYEMULROOT | NOCHROOT;
+	ndp->ni_cnd.cn_flags &= TRYEMULROOT | NOCHROOT | SANDBOXINDIR;
 
 	if (fmode & O_CREAT) {
 		ndp->ni_cnd.cn_nameiop = CREATE;
