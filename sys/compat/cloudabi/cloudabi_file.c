@@ -95,11 +95,13 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #endif
 
 #include <sys/param.h>
+#include <sys/dirent.h>
 #include <sys/file.h>
 #ifdef FILEASSOC
 #include <sys/fileassoc.h>
 #endif
 #include <sys/filedesc.h>
+#include <sys/malloc.h>
 #include <sys/namei.h>
 #include <sys/syscallargs.h>
 #if NVERIEXEC > 0
@@ -397,12 +399,158 @@ out1:
 	return (error);
 }
 
+/* Performs an uiomove(), discarding excessive data. */
+static int
+safe_uiomove(void *buf, size_t howmuch, struct uio *uiop)
+{
+
+	if (howmuch > uiop->uio_resid)
+		howmuch = uiop->uio_resid;
+	return (uiomove(buf, howmuch, uiop));
+}
+
+/* Converts the file type from a directory entry. */
+static cloudabi_filetype_t
+convert_type(uint8_t type)
+{
+
+	switch (type) {
+	case DT_BLK:
+		return (CLOUDABI_FILETYPE_BLOCK_DEVICE);
+	case DT_CHR:
+		return (CLOUDABI_FILETYPE_CHARACTER_DEVICE);
+	case DT_DIR:
+		return (CLOUDABI_FILETYPE_DIRECTORY);
+	case DT_FIFO:
+		return (CLOUDABI_FILETYPE_FIFO);
+	case DT_LNK:
+		return (CLOUDABI_FILETYPE_SYMBOLIC_LINK);
+	case DT_REG:
+		return (CLOUDABI_FILETYPE_REGULAR_FILE);
+	case DT_SOCK: {
+		/* The exact type cannot be derived. */
+		return (CLOUDABI_FILETYPE_SOCKET_STREAM);
+	}
+	default:
+		return (CLOUDABI_FILETYPE_UNKNOWN);
+	}
+}
+
 int
 cloudabi_sys_file_readdir(struct lwp *l,
     const struct cloudabi_sys_file_readdir_args *uap, register_t *retval)
 {
+	struct iovec iov = {
+		.iov_base = (void *)SCARG(uap, buf),
+		.iov_len = SCARG(uap, nbyte)
+	};
+	struct uio uio = {
+		.uio_iov = &iov,
+		.uio_iovcnt = 1,
+		.uio_resid = iov.iov_len,
+		.uio_rw = UIO_READ,
+		.uio_vmspace = l->l_proc->p_vmspace
+	};
+	file_t *fp;
+	struct vnode *vp;
+	void *readbuf;
+	cloudabi_dircookie_t offset;
+	int error;
 
-	return (ENOSYS);
+	error = fd_getvnode(SCARG(uap, fd), &fp);
+	if (error != 0)
+		return (error == EINVAL ? ENOTDIR : error);
+
+	if ((fp->f_flag & FREAD) == 0) {
+		fd_putfile(SCARG(uap, fd));
+		return (EBADF);
+	}
+
+	vp = fp->f_vnode;
+	if (vp->v_type != VDIR) {
+		fd_putfile(SCARG(uap, fd));
+		return (ENOTDIR);
+	}
+
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+
+	/*
+	 * TODO(ed): Allocate something smaller than MAXBSIZE in case we
+	 * only need to return a small amount of data.
+	 */
+	readbuf = malloc(MAXBSIZE, M_TEMP, M_WAITOK);
+	offset = SCARG(uap, cookie);
+	while (uio.uio_resid > 0) {
+		struct iovec readiov = {
+			.iov_base = readbuf,
+			.iov_len = MAXBSIZE
+		};
+		struct uio readuio = {
+			.uio_iov = &readiov,
+			.uio_iovcnt = 1,
+			.uio_rw = UIO_READ,
+			.uio_resid = MAXBSIZE,
+			.uio_offset = offset
+		};
+		off_t *cookies = NULL, *cookie;
+		int eof, ncookies = 0;
+
+		/* Read new directory entries. */
+		UIO_SETUP_SYSSPACE(&readuio);
+		error = VOP_READDIR(vp, &readuio, fp->f_cred, &eof,
+		    &cookies, &ncookies);
+		if (error != 0)
+			goto done;
+
+		/* Convert entries to CloudABI's format. */
+		/* TODO(ed): Add support for filesystems without cookies. */
+		ssize_t readbuflen = MAXBSIZE - readuio.uio_resid;
+		struct dirent *bde = readbuf;
+		cookie = cookies;
+		while (readbuflen >= offsetof(struct dirent, d_name) &&
+		    uio.uio_resid > 0 && ncookies > 0) {
+			/* Ensure that the returned offset always increases. */
+			if (readbuflen >= bde->d_reclen && bde->d_fileno != 0 &&
+			    *cookie > offset) {
+				cloudabi_dirent_t cde = {
+					.d_next = *cookie,
+					.d_ino = bde->d_fileno,
+					.d_namlen = bde->d_namlen,
+					.d_type = convert_type(bde->d_type),
+				};
+
+				error = safe_uiomove(&cde, sizeof(cde), &uio);
+				if (error != 0) {
+					free(cookies, M_TEMP);
+					goto done;
+				}
+				error = safe_uiomove(bde->d_name, bde->d_namlen,
+				    &uio);
+				if (error != 0) {
+					free(cookies, M_TEMP);
+					goto done;
+				}
+			}
+
+			if (offset < *cookie)
+				offset = *cookie;
+			++cookie;
+			--ncookies;
+			readbuflen -= bde->d_reclen;
+			bde = (struct dirent *)((char *)bde + bde->d_reclen);
+		}
+		free(cookies, M_TEMP);
+
+		if (eof)
+			break;
+	}
+
+done:
+	VOP_UNLOCK(vp);
+	fd_putfile(SCARG(uap, fd));
+	free(readbuf, M_TEMP);
+	retval[0] = SCARG(uap, nbyte) - uio.uio_resid;
+	return (error);
 }
 
 int
