@@ -53,16 +53,16 @@ __KERNEL_RCSID(0, "$NetBSD$");
 	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
 static int
-cloudabi_namei(struct lwp *l, int fdat, struct nameidata *ndp)
+cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 {
 	file_t *dfp;
 	int error;
 
-	error = fd_getvnode(fdat, &dfp);
+	error = fd_getvnode(fd, &dfp);
 	if (error == 0) {
 		NDAT(ndp, dfp->f_vnode);
 		error = namei(ndp);
-		fd_putfile(fdat);
+		fd_putfile(fd);
 	}
 	return (error);
 }
@@ -176,8 +176,60 @@ int
 cloudabi_sys_file_link(struct lwp *l,
     const struct cloudabi_sys_file_link_args *uap, register_t *retval)
 {
+	struct nameidata nd1, nd2;
+	struct pathbuf *pb;
+	int error;
 
-	return (ENOSYS);
+	/* Look up source path. */
+	error = pathbuf_copyin_length(SCARG(uap, path1), SCARG(uap, path1len),
+	    &pb);
+	if (error != 0)
+		return (error);
+	CLOUDABI_NDINIT(&nd1, LOOKUP, FOLLOW, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd1), &nd1);
+	pathbuf_destroy(pb);
+	if (error != 0)
+		return (error);
+
+	/* Look up destination path. */
+	error = pathbuf_copyin_length(SCARG(uap, path2), SCARG(uap, path2len),
+	    &pb);
+	if (error != 0)
+		goto out1;
+	CLOUDABI_NDINIT(&nd2, CREATE, LOCKPARENT, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd2), &nd2);
+	if (error != 0)
+		goto out2;
+
+	if (nd2.ni_vp != NULL) {
+		/* Target file already exists. */
+		error = EEXIST;
+	} else if (nd1.ni_vp->v_type == VDIR) {
+		/* Source file is a directory. */
+		error = EPERM;
+	} else if (nd1.ni_vp->v_mount != nd2.ni_dvp->v_mount) {
+		/* Hardlink would cross mountpoints. */
+		error = EXDEV;
+	}
+
+	if (error == 0) {
+		/* Create hardlink. */
+		error = VOP_LINK(nd2.ni_dvp, nd1.ni_vp, &nd2.ni_cnd);
+	} else {
+		/* Abort. */
+		VOP_ABORTOP(nd2.ni_dvp, &nd2.ni_cnd);
+		if (nd2.ni_dvp == nd2.ni_vp)
+			vrele(nd2.ni_dvp);
+		else
+			vput(nd2.ni_dvp);
+		if (nd2.ni_vp != NULL)
+			vrele(nd2.ni_vp);
+	}
+out2:
+	pathbuf_destroy(pb);
+out1:
+	vrele(nd1.ni_vp);
+	return (error);
 }
 
 int
@@ -308,12 +360,10 @@ cloudabi_sys_file_readlink(struct lwp *l,
 	/* Look up symbolic link. */
 	CLOUDABI_NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, pb);
 	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
-	if (error != 0) {
-		pathbuf_destroy(pb);
-		return (error);
-	}
-	vp = nd.ni_vp;
 	pathbuf_destroy(pb);
+	if (error != 0)
+		return (error);
+	vp = nd.ni_vp;
 
 	/* Validate file type. */
 	if (vp->v_type != VLNK) {
