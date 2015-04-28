@@ -145,6 +145,7 @@ cloudabi_sys_mem_sync(struct lwp *l,
 	SCARG(&sys___msync13_args, len) = SCARG(uap, len);
 
 	/* Convert flags. */
+	SCARG(&sys___msync13_args, flags) = 0;
 	switch (SCARG(uap, flags) & (CLOUDABI_MS_ASYNC | CLOUDABI_MS_SYNC)) {
 	case CLOUDABI_MS_ASYNC:
 		SCARG(&sys___msync13_args, flags) |= MS_ASYNC;
