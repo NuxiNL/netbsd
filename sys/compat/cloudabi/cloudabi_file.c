@@ -185,7 +185,9 @@ cloudabi_sys_file_link(struct lwp *l,
 	    &pb);
 	if (error != 0)
 		return (error);
-	CLOUDABI_NDINIT(&nd1, LOOKUP, FOLLOW, pb);
+	CLOUDABI_NDINIT(&nd1, LOOKUP,
+	    (SCARG(uap, fd1) & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) != 0 ?
+	    FOLLOW : NOFOLLOW, pb);
 	error = cloudabi_namei(l, SCARG(uap, fd1), &nd1);
 	pathbuf_destroy(pb);
 	if (error != 0)
