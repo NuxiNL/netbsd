@@ -22,6 +22,69 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+/*-
+ * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Andrew Doran.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
+ * Copyright (c) 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ * (c) UNIX System Laboratories, Inc.
+ * All or some portions of this file are derived from material licensed
+ * to the University of California by American Telephone and Telegraph
+ * Co. or Unix System Laboratories, Inc. and are reproduced herein with
+ * the permission of UNIX System Laboratories, Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ *	@(#)vfs_syscalls.c	8.42 (Berkeley) 7/31/95
+ */
 
 #include <sys/cdefs.h>
 __KERNEL_RCSID(0, "$NetBSD$");
@@ -401,8 +464,323 @@ int
 cloudabi_sys_file_rename(struct lwp *l,
     const struct cloudabi_sys_file_rename_args *uap, register_t *retval)
 {
+	struct pathbuf *fpb, *tpb;
+	struct nameidata fnd, tnd;
+	struct vnode *fdvp, *fvp;
+	struct vnode *tdvp, *tvp;
+	struct mount *mp, *tmp;
+	int error;
 
-	return (ENOSYS);
+	error = pathbuf_copyin_length(SCARG(uap, old), SCARG(uap, oldlen),
+	    &fpb);
+	if (error)
+		goto out0;
+	KASSERT(fpb != NULL);
+
+	error = pathbuf_copyin_length(SCARG(uap, new), SCARG(uap, newlen),
+	    &tpb);
+	if (error)
+		goto out1;
+	KASSERT(tpb != NULL);
+
+	/*
+	 * Lookup from.
+	 *
+	 * XXX LOCKPARENT is wrong because we don't actually want it
+	 * locked yet, but (a) namei is insane, and (b) VOP_RENAME is
+	 * insane, so for the time being we need to leave it like this.
+	 */
+	CLOUDABI_NDINIT(&fnd, DELETE, LOCKPARENT | INRENAME, fpb);
+	error = cloudabi_namei(l, SCARG(uap, oldfd), &fnd);
+	if (error != 0)
+		goto out2;
+
+	/*
+	 * Pull out the important results of the lookup, fdvp and fvp.
+	 * Of course, fvp is bogus because we're about to unlock fdvp.
+	 */
+	fdvp = fnd.ni_dvp;
+	fvp = fnd.ni_vp;
+	KASSERT(fdvp != NULL);
+	KASSERT(fvp != NULL);
+	KASSERT((fdvp == fvp) || (VOP_ISLOCKED(fdvp) == LK_EXCLUSIVE));
+
+	/*
+	 * Make sure neither fdvp nor fvp is locked.
+	 */
+	if (fdvp != fvp)
+		VOP_UNLOCK(fdvp);
+	/* XXX KASSERT(VOP_ISLOCKED(fdvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT(VOP_ISLOCKED(fvp) != LK_EXCLUSIVE); */
+
+	/*
+	 * Reject renaming `.' and `..'.  Can't do this until after
+	 * namei because we need namei's parsing to find the final
+	 * component name.  (namei should just leave us with the final
+	 * component name and not look it up itself, but anyway...)
+	 *
+	 * This was here before because we used to relookup from
+	 * instead of to and relookup requires the caller to check
+	 * this, but now file systems may depend on this check, so we
+	 * must retain it until the file systems are all rototilled.
+	 */
+	if (((fnd.ni_cnd.cn_namelen == 1) &&
+		(fnd.ni_cnd.cn_nameptr[0] == '.')) ||
+	    ((fnd.ni_cnd.cn_namelen == 2) &&
+		(fnd.ni_cnd.cn_nameptr[0] == '.') &&
+		(fnd.ni_cnd.cn_nameptr[1] == '.'))) {
+		error = EINVAL;	/* XXX EISDIR?  */
+		goto abort0;
+	}
+
+	/*
+	 * Lookup to.
+	 *
+	 * XXX LOCKPARENT is wrong, but...insanity, &c.  Also, using
+	 * fvp here to decide whether to add CREATEDIR is a load of
+	 * bollocks because fvp might be the wrong node by now, since
+	 * fdvp is unlocked.
+	 *
+	 * XXX Why not pass CREATEDIR always?
+	 */
+	CLOUDABI_NDINIT(&tnd, RENAME, LOCKPARENT | NOCACHE | INRENAME |
+	    ((fvp->v_type == VDIR)? CREATEDIR : 0), tpb);
+	error = cloudabi_namei(l, SCARG(uap, newfd), &tnd);
+	if (error != 0)
+		goto abort0;
+
+	/*
+	 * Pull out the important results of the lookup, tdvp and tvp.
+	 * Of course, tvp is bogus because we're about to unlock tdvp.
+	 */
+	tdvp = tnd.ni_dvp;
+	tvp = tnd.ni_vp;
+	KASSERT(tdvp != NULL);
+	KASSERT((tdvp == tvp) || (VOP_ISLOCKED(tdvp) == LK_EXCLUSIVE));
+
+	/*
+	 * Make sure neither tdvp nor tvp is locked.
+	 */
+	if (tdvp != tvp)
+		VOP_UNLOCK(tdvp);
+	/* XXX KASSERT(VOP_ISLOCKED(tdvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) != LK_EXCLUSIVE)); */
+
+	/*
+	 * Reject renaming onto `.' or `..'.  relookup is unhappy with
+	 * these, which is why we must do this here.  Once upon a time
+	 * we relooked up from instead of to, and consequently didn't
+	 * need this check, but now that we relookup to instead of
+	 * from, we need this; and we shall need it forever forward
+	 * until the VOP_RENAME protocol changes, because file systems
+	 * will no doubt begin to depend on this check.
+	 */
+	if ((tnd.ni_cnd.cn_namelen == 1) && (tnd.ni_cnd.cn_nameptr[0] == '.')) {
+		error = EISDIR;
+		goto abort1;
+	}
+	if ((tnd.ni_cnd.cn_namelen == 2) &&
+	    (tnd.ni_cnd.cn_nameptr[0] == '.') &&
+	    (tnd.ni_cnd.cn_nameptr[1] == '.')) {
+		error = EINVAL;
+		goto abort1;
+	}
+
+	/*
+	 * Get the mount point.  If the file system has been unmounted,
+	 * which it may be because we're not holding any vnode locks,
+	 * then v_mount will be NULL.  We're not really supposed to
+	 * read v_mount without holding the vnode lock, but since we
+	 * have fdvp referenced, if fdvp->v_mount changes then at worst
+	 * it will be set to NULL, not changed to another mount point.
+	 * And, of course, since it is up to the file system to
+	 * determine the real lock order, we can't lock both fdvp and
+	 * tdvp at the same time.
+	 */
+	mp = fdvp->v_mount;
+	if (mp == NULL) {
+		error = ENOENT;
+		goto abort1;
+	}
+
+	/*
+	 * Make sure the mount points match.  Again, although we don't
+	 * hold any vnode locks, the v_mount fields may change -- but
+	 * at worst they will change to NULL, so this will never become
+	 * a cross-device rename, because we hold vnode references.
+	 *
+	 * XXX Because nothing is locked and the compiler may reorder
+	 * things here, unmounting the file system at an inopportune
+	 * moment may cause rename to fail with ENXDEV when it really
+	 * should fail with ENOENT.
+	 */
+	tmp = tdvp->v_mount;
+	if (tmp == NULL) {
+		error = ENOENT;
+		goto abort1;
+	}
+
+	if (mp != tmp) {
+		error = EXDEV;
+		goto abort1;
+	}
+
+	/*
+	 * Take the vfs rename lock to avoid cross-directory screw cases.
+	 * Nothing is locked currently, so taking this lock is safe.
+	 */
+	error = VFS_RENAMELOCK_ENTER(mp);
+	if (error)
+		goto abort1;
+
+	/*
+	 * Now fdvp, fvp, tdvp, and (if nonnull) tvp are referenced,
+	 * and nothing is locked except for the vfs rename lock.
+	 *
+	 * The next step is a little rain dance to conform to the
+	 * insane lock protocol, even though it does nothing to ward
+	 * off race conditions.
+	 *
+	 * We need tdvp and tvp to be locked.  However, because we have
+	 * unlocked tdvp in order to hold no locks while we take the
+	 * vfs rename lock, tvp may be wrong here, and we can't safely
+	 * lock it even if the sensible file systems will just unlock
+	 * it straight away.  Consequently, we must lock tdvp and then
+	 * relookup tvp to get it locked.
+	 *
+	 * Finally, because the VOP_RENAME protocol is brain-damaged
+	 * and various file systems insanely depend on the semantics of
+	 * this brain damage, the lookup of to must be the last lookup
+	 * before VOP_RENAME.
+	 */
+	vn_lock(tdvp, LK_EXCLUSIVE | LK_RETRY);
+	error = relookup(tdvp, &tnd.ni_vp, &tnd.ni_cnd, 0);
+	if (error)
+		goto abort2;
+
+	/*
+	 * Drop the old tvp and pick up the new one -- which might be
+	 * the same, but that doesn't matter to us.  After this, tdvp
+	 * and tvp should both be locked.
+	 */
+	if (tvp != NULL)
+		vrele(tvp);
+	tvp = tnd.ni_vp;
+	KASSERT(VOP_ISLOCKED(tdvp) == LK_EXCLUSIVE);
+	KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) == LK_EXCLUSIVE));
+
+	/*
+	 * The old do_sys_rename had various consistency checks here
+	 * involving fvp and tvp.  fvp is bogus already here, and tvp
+	 * will become bogus soon in any sensible file system, so the
+	 * only purpose in putting these checks here is to give lip
+	 * service to these screw cases and to acknowledge that they
+	 * exist, not actually to handle them, but here you go
+	 * anyway...
+	 */
+
+	/*
+	 * Acknowledge that directories and non-directories aren't
+	 * suposed to mix.
+	 */
+	if (tvp != NULL) {
+		if ((fvp->v_type == VDIR) && (tvp->v_type != VDIR)) {
+			error = ENOTDIR;
+			goto abort3;
+		} else if ((fvp->v_type != VDIR) && (tvp->v_type == VDIR)) {
+			error = EISDIR;
+			goto abort3;
+		}
+	}
+
+	/*
+	 * Acknowledge some random screw case, among the dozens that
+	 * might arise.
+	 */
+	if (fvp == tdvp) {
+		error = EINVAL;
+		goto abort3;
+	}
+
+	/*
+	 * Acknowledge that POSIX has a wacky screw case.
+	 *
+	 * XXX Eventually the retain flag needs to be passed on to
+	 * VOP_RENAME.
+	 */
+	if (fvp == tvp) {
+		error = 0;
+		goto abort3;
+	}
+
+	/*
+	 * Make sure veriexec can screw us up.  (But a race can screw
+	 * up veriexec, of course -- remember, fvp and (soon) tvp are
+	 * bogus.)
+	 */
+#if NVERIEXEC > 0
+	{
+		char *f1, *f2;
+		size_t f1_len;
+		size_t f2_len;
+
+		f1_len = fnd.ni_cnd.cn_namelen + 1;
+		f1 = kmem_alloc(f1_len, KM_SLEEP);
+		strlcpy(f1, fnd.ni_cnd.cn_nameptr, f1_len);
+
+		f2_len = tnd.ni_cnd.cn_namelen + 1;
+		f2 = kmem_alloc(f2_len, KM_SLEEP);
+		strlcpy(f2, tnd.ni_cnd.cn_nameptr, f2_len);
+
+		error = veriexec_renamechk(curlwp, fvp, f1, tvp, f2);
+
+		kmem_free(f1, f1_len);
+		kmem_free(f2, f2_len);
+
+		if (error)
+			goto abort3;
+	}
+#endif /* NVERIEXEC > 0 */
+
+	/*
+	 * All ready.  Incant the rename vop.
+	 */
+	/* XXX KASSERT(VOP_ISLOCKED(fdvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT(VOP_ISLOCKED(fvp) != LK_EXCLUSIVE); */
+	KASSERT(VOP_ISLOCKED(tdvp) == LK_EXCLUSIVE);
+	KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) == LK_EXCLUSIVE));
+	error = VOP_RENAME(fdvp, fvp, &fnd.ni_cnd, tdvp, tvp, &tnd.ni_cnd);
+
+	/*
+	 * VOP_RENAME releases fdvp, fvp, tdvp, and tvp, and unlocks
+	 * tdvp and tvp.  But we can't assert any of that.
+	 */
+	/* XXX KASSERT(VOP_ISLOCKED(fdvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT(VOP_ISLOCKED(fvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT(VOP_ISLOCKED(tdvp) != LK_EXCLUSIVE); */
+	/* XXX KASSERT((tvp == NULL) || (VOP_ISLOCKED(tvp) != LK_EXCLUSIVE)); */
+
+	/*
+	 * So all we have left to do is to drop the rename lock and
+	 * destroy the pathbufs.
+	 */
+	VFS_RENAMELOCK_EXIT(mp);
+	goto out2;
+
+abort3:	if ((tvp != NULL) && (tvp != tdvp))
+		VOP_UNLOCK(tvp);
+abort2:	VOP_UNLOCK(tdvp);
+	VFS_RENAMELOCK_EXIT(mp);
+abort1:	VOP_ABORTOP(tdvp, &tnd.ni_cnd);
+	vrele(tdvp);
+	if (tvp != NULL)
+		vrele(tvp);
+abort0:	VOP_ABORTOP(fdvp, &fnd.ni_cnd);
+	vrele(fdvp);
+	vrele(fvp);
+out2:	pathbuf_destroy(tpb);
+out1:	pathbuf_destroy(fpb);
+out0:	return error;
 }
 
 #define NSEC_PER_SEC 1000000000
