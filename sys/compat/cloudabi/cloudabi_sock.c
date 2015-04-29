@@ -27,6 +27,9 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
@@ -34,8 +37,18 @@ int
 cloudabi_sys_sock_accept(struct lwp *l,
     const struct cloudabi_sys_sock_accept_args *uap, register_t *retval)
 {
+	struct mbuf *name;
+	int error;
 
-	return (ENOSYS);
+	error = do_sys_accept(l, SCARG(uap, s), &name, retval, NULL, 0, 0);
+	if (error != 0)
+		return (error);
+
+	/* TODO(ed): Copy out socket address. */
+
+	if (name != NULL)
+		m_free(name);
+	return (0);
 }
 
 int
@@ -66,14 +79,32 @@ int
 cloudabi_sys_sock_listen(struct lwp *l,
     const struct cloudabi_sys_sock_listen_args *uap, register_t *retval)
 {
+	struct sys_listen_args sys_listen_args;
 
-	return (ENOSYS);
+	SCARG(&sys_listen_args, s) = SCARG(uap, s);
+	SCARG(&sys_listen_args, backlog) = SCARG(uap, backlog);
+	return (sys_listen(l, &sys_listen_args, retval));
 }
 
 int
 cloudabi_sys_sock_shutdown(struct lwp *l,
     const struct cloudabi_sys_sock_shutdown_args *uap, register_t *retval)
 {
+	struct sys_shutdown_args sys_shutdown_args;
 
-	return (ENOSYS);
+	SCARG(&sys_shutdown_args, s) = SCARG(uap, fd);
+	switch (SCARG(uap, how)) {
+	case CLOUDABI_SHUT_RD:
+		SCARG(&sys_shutdown_args, how) = SHUT_RD;
+		break;
+	case CLOUDABI_SHUT_WR:
+		SCARG(&sys_shutdown_args, how) = SHUT_WR;
+		break;
+	case CLOUDABI_SHUT_RD | CLOUDABI_SHUT_WR:
+		SCARG(&sys_shutdown_args, how) = SHUT_RDWR;
+		break;
+	default:
+		return (EINVAL);
+	}
+	return (sys_shutdown(l, &sys_shutdown_args, retval));
 }
