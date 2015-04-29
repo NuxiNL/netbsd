@@ -113,10 +113,10 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <compat/cloudabi/cloudabi_util.h>
 
 #define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
-/* TODO(ed): Limit lookup to local directory. */
 #define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
 	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
+/* Performs a namei lookup with a base directory as a file descriptor. */
 static int
 cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 {
@@ -129,6 +129,27 @@ cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 		error = namei(ndp);
 		fd_putfile(fd);
 	}
+	return (error);
+}
+
+/* Returns the vnode corresponding with a base directory and pathname. */
+static int
+cloudabi_namei_simple(struct lwp *l, cloudabi_lookup_t fd, const char *path,
+    size_t pathlen, unsigned int flags, struct vnode **vp)
+{
+	struct nameidata nd;
+	struct pathbuf *pb;
+	int error;
+
+	error = pathbuf_copyin_length(path, pathlen, &pb);
+	if (error != 0)
+		return (error);
+	CLOUDABI_NDINIT(&nd, LOOKUP,
+	    ((fd & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) != 0 ?  FOLLOW : NOFOLLOW) |
+	    flags, pb);
+	error = cloudabi_namei(l, fd, &nd);
+	pathbuf_destroy(pb);
+	*vp = nd.ni_vp;
 	return (error);
 }
 
@@ -241,20 +262,14 @@ int
 cloudabi_sys_file_link(struct lwp *l,
     const struct cloudabi_sys_file_link_args *uap, register_t *retval)
 {
-	struct nameidata nd1, nd2;
+	struct nameidata nd;
 	struct pathbuf *pb;
+	struct vnode *vp;
 	int error;
 
 	/* Look up source path. */
-	error = pathbuf_copyin_length(SCARG(uap, path1), SCARG(uap, path1len),
-	    &pb);
-	if (error != 0)
-		return (error);
-	CLOUDABI_NDINIT(&nd1, LOOKUP,
-	    (SCARG(uap, fd1) & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) != 0 ?
-	    FOLLOW : NOFOLLOW, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd1), &nd1);
-	pathbuf_destroy(pb);
+	error = cloudabi_namei_simple(l, SCARG(uap, fd1), SCARG(uap, path1),
+	    SCARG(uap, path1len), 0, &vp);
 	if (error != 0)
 		return (error);
 
@@ -263,39 +278,39 @@ cloudabi_sys_file_link(struct lwp *l,
 	    &pb);
 	if (error != 0)
 		goto out1;
-	CLOUDABI_NDINIT(&nd2, CREATE, LOCKPARENT, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd2), &nd2);
+	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd2), &nd);
 	if (error != 0)
 		goto out2;
 
-	if (nd2.ni_vp != NULL) {
+	if (nd.ni_vp != NULL) {
 		/* Target file already exists. */
 		error = EEXIST;
-	} else if (nd1.ni_vp->v_type == VDIR) {
+	} else if (vp->v_type == VDIR) {
 		/* Source file is a directory. */
 		error = EPERM;
-	} else if (nd1.ni_vp->v_mount != nd2.ni_dvp->v_mount) {
+	} else if (nd.ni_dvp->v_mount != vp->v_mount) {
 		/* Hardlink would cross mountpoints. */
 		error = EXDEV;
 	}
 
 	if (error == 0) {
 		/* Create hardlink. */
-		error = VOP_LINK(nd2.ni_dvp, nd1.ni_vp, &nd2.ni_cnd);
+		error = VOP_LINK(nd.ni_dvp, vp, &nd.ni_cnd);
 	} else {
 		/* Abort. */
-		VOP_ABORTOP(nd2.ni_dvp, &nd2.ni_cnd);
-		if (nd2.ni_dvp == nd2.ni_vp)
-			vrele(nd2.ni_dvp);
+		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
+		if (nd.ni_dvp == nd.ni_vp)
+			vrele(nd.ni_dvp);
 		else
-			vput(nd2.ni_dvp);
-		if (nd2.ni_vp != NULL)
-			vrele(nd2.ni_vp);
+			vput(nd.ni_dvp);
+		if (nd.ni_vp != NULL)
+			vrele(nd.ni_vp);
 	}
 out2:
 	pathbuf_destroy(pb);
 out1:
-	vrele(nd1.ni_vp);
+	vrele(vp);
 	return (error);
 }
 
@@ -558,25 +573,15 @@ cloudabi_sys_file_readlink(struct lwp *l,
     const struct cloudabi_sys_file_readlink_args *uap, register_t *retval)
 {
 	struct iovec iov;
-	struct nameidata nd;
 	struct uio uio;
 	struct vnode *vp;
-	struct pathbuf *pb;
 	int error;
 
-	/* Copy in pathname. */
-	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
-	    &pb);
-	if (error)
-		return (error);
-
-	/* Look up symbolic link. */
-	CLOUDABI_NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
-	pathbuf_destroy(pb);
+	/* Look up pathname. */
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
+	    SCARG(uap, pathlen), LOCKLEAF, &vp);
 	if (error != 0)
 		return (error);
-	vp = nd.ni_vp;
 
 	/* Validate file type. */
 	if (vp->v_type != VLNK) {
@@ -998,61 +1003,134 @@ cloudabi_sys_file_stat_fget(struct lwp *l,
 	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
 
+static void
+convert_utimens_arguments(const cloudabi_filestat_t *fs,
+    cloudabi_fsflags_t flags, struct timespec *ts)
+{
+
+	if ((flags & CLOUDABI_FILESTAT_ATIM_NOW) != 0) {
+		ts[0].tv_nsec = UTIME_NOW;
+	} else if ((flags & CLOUDABI_FILESTAT_ATIM) != 0) {
+		ts[0].tv_sec = fs->st_atim / NSEC_PER_SEC;
+		ts[0].tv_nsec = fs->st_atim % NSEC_PER_SEC;
+	} else {
+		ts[0].tv_nsec = UTIME_OMIT;
+	}
+
+	if ((flags & CLOUDABI_FILESTAT_MTIM_NOW) != 0) {
+		ts[1].tv_nsec = UTIME_NOW;
+	} else if ((flags & CLOUDABI_FILESTAT_MTIM) != 0) {
+		ts[1].tv_sec = fs->st_mtim / NSEC_PER_SEC;
+		ts[1].tv_nsec = fs->st_mtim % NSEC_PER_SEC;
+	} else {
+		ts[1].tv_nsec = UTIME_OMIT;
+	}
+}
+
+static int
+do_stat_put(struct lwp *l, struct vnode *vp, const cloudabi_filestat_t *fsp,
+    cloudabi_fsflags_t flags)
+{
+	cloudabi_filestat_t fs;
+	struct vattr vattr;
+	struct timespec ts[2];
+	int error;
+	bool vanull, setbirthtime;
+
+	/* Only support timestamp modification for now. */
+	if ((flags & ~(CLOUDABI_FILESTAT_ATIM | CLOUDABI_FILESTAT_ATIM_NOW |
+	    CLOUDABI_FILESTAT_MTIM | CLOUDABI_FILESTAT_MTIM_NOW)) != 0 ||
+	    flags == 0)
+		return (EINVAL);
+
+	/* Copy in timestamps and convert them to struct timespecs. */
+	error = copyin(fsp, &fs, sizeof(fs));
+	if (error != 0)
+		return (error);
+	convert_utimens_arguments(&fs, flags, ts);
+
+	/* Process UTIME_NOW. */
+	if (ts[0].tv_nsec == UTIME_NOW) {
+		nanotime(&ts[0]);
+		if (ts[1].tv_nsec == UTIME_NOW) {
+			vanull = true;
+			ts[1] = ts[0];
+		}
+	} else if (ts[1].tv_nsec == UTIME_NOW)
+		nanotime(&ts[1]);
+
+	/* Modify vnode attributes. */
+	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+	setbirthtime = (VOP_GETATTR(vp, &vattr, l->l_cred) == 0 &&
+	    timespeccmp(&ts[1], &vattr.va_birthtime, <));
+	vattr_null(&vattr);
+	if (ts[0].tv_nsec != UTIME_OMIT)
+		vattr.va_atime = ts[0];
+	if (ts[1].tv_nsec != UTIME_OMIT) {
+		vattr.va_mtime = ts[1];
+		if (setbirthtime)
+			vattr.va_birthtime = ts[1];
+	}
+	if (vanull)
+		vattr.va_vaflags |= VA_UTIMES_NULL;
+	error = VOP_SETATTR(vp, &vattr, l->l_cred);
+	VOP_UNLOCK(vp);
+	return (error);
+}
+
 int
 cloudabi_sys_file_stat_fput(struct lwp *l,
     const struct cloudabi_sys_file_stat_fput_args *uap, register_t *retval)
 {
-	cloudabi_filestat_t fs;
+	file_t *fp;
 	int error;
 
-	error = copyin(SCARG(uap, buf), &fs, sizeof(fs));
-	if (error != 0)
-		return (error);
-
 	if ((SCARG(uap, flags) & CLOUDABI_FILESTAT_SIZE) != 0) {
+		cloudabi_filestat_t fs;
 		struct sys_ftruncate_args sys_ftruncate_args;
 
+		/* Treat file truncation separately for now. */
 		if ((SCARG(uap, flags) & ~CLOUDABI_FILESTAT_SIZE) != 0)
 			return (EINVAL);
+		error = copyin(SCARG(uap, buf), &fs, sizeof(fs));
+		if (error != 0)
+			return (error);
 
 		SCARG(&sys_ftruncate_args, fd) = SCARG(uap, fd);
 		SCARG(&sys_ftruncate_args, length) = fs.st_size;
 		return (sys_ftruncate(l, &sys_ftruncate_args, retval));
-	} else if ((SCARG(uap, flags) & (CLOUDABI_FILESTAT_ATIM |
-	    CLOUDABI_FILESTAT_ATIM_NOW | CLOUDABI_FILESTAT_MTIM |
-	    CLOUDABI_FILESTAT_MTIM_NOW)) != 0) {
-		/* TODO(ed): Implement. */
-		return (ENOSYS);
 	}
-	return (EINVAL);
+
+	error = fd_getvnode(SCARG(uap, fd), &fp);
+	if (error != 0)
+		return (error);
+	error = do_stat_put(l, fp->f_vnode, SCARG(uap, buf), SCARG(uap, flags));
+	fd_putfile(SCARG(uap, fd));
+	return (error);
 }
 
 int
 cloudabi_sys_file_stat_get(struct lwp *l,
     const struct cloudabi_sys_file_stat_get_args *uap, register_t *retval)
 {
-	struct nameidata nd;
 	struct stat sb;
 	cloudabi_filestat_t csb;
-	struct pathbuf *pb;
+	struct vnode *vp;
 	int error;
 
-	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
-	    &pb);
+	/* Look up path. */
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
+	    SCARG(uap, pathlen), LOCKLEAF, &vp);
 	if (error != 0)
 		return (error);
 
-	CLOUDABI_NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
-	pathbuf_destroy(pb);
+	/* Obtain stat structure. */
+	error = vn_stat(vp, &sb);
+	vput(vp);
 	if (error != 0)
 		return (error);
 
-	error = vn_stat(nd.ni_vp, &sb);
-	vput(nd.ni_vp);
-	if (error != 0)
-		return (error);
-
+	/* Convert to CloudABI's format. */
 	convert_stat(NULL, &sb, &csb);
 	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
@@ -1061,8 +1139,19 @@ int
 cloudabi_sys_file_stat_put(struct lwp *l,
     const struct cloudabi_sys_file_stat_put_args *uap, register_t *retval)
 {
+	struct vnode *vp;
+	int error;
 
-	return (ENOSYS);
+	/* Look up path. */
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
+	    SCARG(uap, pathlen), 0, &vp);
+	if (error != 0)
+		return (error);
+
+	/* Change attributes. */
+	error = do_stat_put(l, vp, SCARG(uap, buf), SCARG(uap, flags));
+	vrele(vp);
+	return (error);
 }
 
 int
