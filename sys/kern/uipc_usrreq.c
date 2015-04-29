@@ -1052,7 +1052,7 @@ unp_listen(struct socket *so, struct lwp *l)
 	 */
 	unp_resetlock(so);
 	if (unp->unp_vnode == NULL)
-		return EINVAL;
+		return unp->unp_conn != NULL ? EINVAL : EDESTADDRREQ;
 
 	return 0;
 }

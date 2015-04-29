@@ -1604,6 +1604,8 @@ soshutdown(struct socket *so, int how)
 	pr = so->so_proto;
 	if (!(how == SHUT_RD || how == SHUT_WR || how == SHUT_RDWR))
 		return (EINVAL);
+	if ((so->so_state & SS_ISCONNECTED) == 0)
+		return (ENOTCONN);
 
 	if (how == SHUT_RD || how == SHUT_RDWR) {
 		sorflush(so);
