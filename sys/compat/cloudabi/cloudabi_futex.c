@@ -815,6 +815,11 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	}
 
 	/* Thread is still enqueued. Remove it. */
+	/* TODO(ed): Remove this. */
+	if (error == 0) {
+		printf("Error was zero. Why?\n");
+		error = ETIMEDOUT;
+	}
 	KASSERT(error != 0);
 	STAILQ_REMOVE(&fq->fq_list, fw, futex_waiter, fw_next);
 	--fq->fq_count;
