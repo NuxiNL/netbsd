@@ -27,16 +27,34 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/domain.h>
+#include <sys/filedesc.h>
+#include <sys/kauth.h>
+#include <sys/namei.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syscallargs.h>
+#include <sys/unpcb.h>
+#include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+#include <compat/cloudabi/cloudabi_util.h>
+
+/* Converts NetBSD's struct sockaddr to CloudABI's cloudabi_sockaddr_t. */
+void
+cloudabi_convert_sockaddr(struct mbuf *name, cloudabi_sockaddr_t *rsa)
+{
+
+	/* TODO(ed): Implement. */
+	if (name != NULL)
+		m_free(name);
+}
 
 int
 cloudabi_sys_sock_accept(struct lwp *l,
     const struct cloudabi_sys_sock_accept_args *uap, register_t *retval)
 {
+	cloudabi_sockstat_t ss;
 	struct mbuf *name;
 	int error;
 
@@ -44,19 +62,108 @@ cloudabi_sys_sock_accept(struct lwp *l,
 	if (error != 0)
 		return (error);
 
-	/* TODO(ed): Copy out socket address. */
-
-	if (name != NULL)
-		m_free(name);
-	return (0);
+	memset(&ss, '\0', sizeof(ss));
+	cloudabi_convert_sockaddr(name, &ss.ss_peername);
+	if (SCARG(uap, buf) != NULL)
+		error = copyout(&ss, SCARG(uap, buf), sizeof(ss));
+	return (error);
 }
 
 int
 cloudabi_sys_sock_bind(struct lwp *l,
     const struct cloudabi_sys_sock_bind_args *uap, register_t *retval)
 {
+	struct nameidata nd;
+	struct vattr vattr;
+	struct pathbuf *pb;
+	struct socket *so;
+	struct unpcb *unp;
+	struct vnode *vp;
+	int error;
 
-	return (ENOSYS);
+	error = fd_getsock(SCARG(uap, s), &so);
+	if (error != 0)
+		return (error);
+	solock(so);
+	if (so->so_proto->pr_domain->dom_family != AF_UNIX) {
+		/* Not a UNIX socket. */
+		error = EAFNOSUPPORT;
+		goto out1;
+	}
+	unp = sotounpcb(so);
+	if (unp->unp_vnode != NULL) {
+		/* Socket already bound. */
+		error = EINVAL;
+		goto out1;
+	}
+	if ((unp->unp_flags & UNP_BUSY) != 0) {
+		/* Bind or connect already in progress. */
+		error = EALREADY;
+		goto out1;
+	}
+	unp->unp_flags |= UNP_BUSY;
+	sounlock(so);
+
+	/* Look up the target path. */
+	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
+	    &pb);
+	if (error != 0) {
+		solock(so);
+		goto out2;
+	}
+	CLOUDABI_NDINIT(&nd, CREATE, FOLLOW | LOCKPARENT | SANDBOXINDIR, pb);
+	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	if (error != 0) {
+		solock(so);
+		goto out3;
+	}
+	vp = nd.ni_vp;
+	if (vp != NULL) {
+		/* Target already exists. */
+		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
+		if (nd.ni_dvp == vp)
+			vrele(nd.ni_dvp);
+		else
+			vput(nd.ni_dvp);
+		vrele(vp);
+		error = EADDRINUSE;
+		solock(so);
+		goto out3;
+	}
+
+	/* Create new socket file. */
+	vattr_null(&vattr);
+	vattr.va_type = VSOCK;
+	vattr.va_mode = CLOUDABI_MODE(l);
+	error = VOP_CREATE(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
+	if (error != 0) {
+		solock(so);
+		goto out4;
+	}
+
+	/* Connect socket to vnode. */
+	vp = nd.ni_vp;
+	vn_lock(vp , LK_EXCLUSIVE | LK_RETRY);
+	solock(so);
+	vp->v_socket = unp->unp_socket;
+	unp->unp_vnode = vp;
+	unp->unp_addrlen = 0;
+	unp->unp_addr = NULL;
+	unp->unp_connid.unp_pid = l->l_proc->p_pid;
+	unp->unp_connid.unp_euid = kauth_cred_geteuid(l->l_cred);
+	unp->unp_connid.unp_egid = kauth_cred_getegid(l->l_cred);
+	unp->unp_flags |= UNP_EIDSBIND;
+	VOP_UNLOCK(vp);
+out4:
+	vput(nd.ni_dvp);
+out3:
+	pathbuf_destroy(pb);
+out2:
+	unp->unp_flags &= ~UNP_BUSY;
+out1:
+	sounlock(so);
+	fd_putfile(SCARG(uap, s));
+	return (error);
 }
 
 int

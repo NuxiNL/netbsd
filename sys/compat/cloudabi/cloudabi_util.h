@@ -31,6 +31,14 @@
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
 
 struct lwp;
+struct mbuf;
+struct nameidata;
+
+/* Mode for new files created by CloudABI processed. */
+#define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
+/* Calls NDINIT() with SANDBOXINDIR set. */
+#define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
+	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
@@ -40,6 +48,12 @@ cloudabi_errno_t cloudabi_convert_errno(int);
  * descriptor type.
  */
 cloudabi_filetype_t cloudabi_convert_filetype(const struct file *, mode_t);
+
+/* Performs a namei lookup with a base directory as a file descriptor. */
+int cloudabi_namei(struct lwp *, cloudabi_fd_t, struct nameidata *);
+
+/* Converts NetBSD's struct sockaddr to CloudABI's cloudabi_sockaddr_t. */
+void cloudabi_convert_sockaddr(struct mbuf *, cloudabi_sockaddr_t *);
 
 /* Initialization of the futex pool. */
 void cloudabi_futex_init(void);

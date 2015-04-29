@@ -112,12 +112,8 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_util.h>
 
-#define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
-#define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
-	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
-
 /* Performs a namei lookup with a base directory as a file descriptor. */
-static int
+int
 cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 {
 	file_t *dfp;
