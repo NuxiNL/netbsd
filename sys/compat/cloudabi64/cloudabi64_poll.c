@@ -27,11 +27,152 @@
 __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
+#include <sys/event.h>
 
 #include <compat/cloudabi/cloudabi_util.h>
 
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
+
+/* Converts CloudABI's event objects to NetBSD's struct kevent. */
+static int
+cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
+    struct kevent *kevp, size_t index, int count)
+{
+	const cloudabi64_event_t *in = (const cloudabi64_event_t *)inp + index;
+
+	while (count-- > 0) {
+		cloudabi64_event_t ev;
+		int error;
+
+		error = copyin(in++, &ev, sizeof(ev));
+		if (error != 0)
+			return (error);
+
+		switch (ev.type) {
+		case CLOUDABI_EVENT_TYPE_CLOCK: {
+			cloudabi_timestamp_t ts;
+
+			/* Convert timestamp to a relative value. */
+			if (ev.clock.timeout > 0) {
+				/* Non-zero timestamp. */
+				error = cloudabi_clock_time_get(curlwp,
+				    ev.clock.clock_id, &ts);
+				if (error != 0)
+					return (error);
+				ts = ts > ev.clock.timeout ? 0 :
+				    ev.clock.timeout - ts;
+				if (ts > INTPTR_MAX)
+					ts = INTPTR_MAX;
+			} else {
+				/* Shortcut: no need to ask for the time. */
+				ts = 0;
+			}
+			kevp->filter = EVFILT_TIMER;
+			kevp->ident = ev.clock.identifier;
+			kevp->fflags = 0;
+			kevp->data = ts / 1000000;
+			break;
+		}
+		case CLOUDABI_EVENT_TYPE_FD_READ:
+			kevp->filter = EVFILT_READ;
+			kevp->ident = ev.fd_readwrite.fd;
+			/* TODO(ed): Fix the poll() case. */
+			kevp->fflags = 0;
+			kevp->data = 0;
+			break;
+		case CLOUDABI_EVENT_TYPE_FD_WRITE:
+			kevp->filter = EVFILT_WRITE;
+			kevp->ident = ev.fd_readwrite.fd;
+			kevp->fflags = 0;
+			kevp->data = 0;
+			break;
+#if 0 /* TODO(ed): Implement. */
+		case CLOUDABI_EVENT_TYPE_PROC_TERMINATE:
+			kevp->filter = EVFILT_PROCDESC;
+			kevp->ident = ev.proc_terminate.fd;
+			kevp->fflags = NOTE_EXIT;
+			kevp->data = 0;
+			break;
+#endif
+		default:
+			kevp->filter = 0;
+			kevp->ident = 0;
+			kevp->fflags = 0;
+			kevp->data = 0;
+			break;
+		}
+		/* TODO(ed): Use proper flags if not anonymous. */
+		kevp->flags = EV_ADD | EV_ONESHOT;
+		kevp->udata = ev.userdata;
+		++kevp;
+	}
+	return (0);
+}
+
+/* Converts NetBSD's struct kevent to CloudABI's event objects. */
+static int
+cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
+    struct kevent *outp, size_t index, int count)
+{
+	cloudabi64_event_t *out = (cloudabi64_event_t *)outp + index;
+
+	while (count-- > 0) {
+		cloudabi64_event_t ev;
+		int error;
+
+		memset(&ev, '\0', sizeof(ev));
+		switch (kevp->filter) {
+		case EVFILT_TIMER:
+			ev.type = CLOUDABI_EVENT_TYPE_CLOCK;
+			ev.clock.identifier = kevp->ident;
+			break;
+		case EVFILT_READ:
+		case EVFILT_WRITE:
+			ev.type = kevp->filter == EVFILT_READ ?
+			    CLOUDABI_EVENT_TYPE_FD_READ :
+			    CLOUDABI_EVENT_TYPE_FD_WRITE;
+			ev.fd_readwrite.fd = kevp->ident;
+			ev.fd_readwrite.nbytes = kevp->data;
+			if ((kevp->flags & EV_EOF) != 0) {
+				ev.fd_readwrite.flags |=
+				    CLOUDABI_EVENT_FD_READWRITE_HANGUP;
+			}
+			break;
+#if 0 /* TODO(ed): Implement. */
+		case EVFILT_PROCDESC:
+			ev.type = CLOUDABI_EVENT_TYPE_PROC_TERMINATE;
+			ev.proc_terminate.fd = kevp->ident;
+			if (WIFSIGNALED(kevp->data)) {
+				/* Process terminated due to a signal. */
+				ev.proc_terminate.signal =
+				    convert_signal(WTERMSIG(kevp->data));
+				ev.proc_terminate.exitcode = 0;
+			} else {
+				/* Process exited. */
+				ev.proc_terminate.signal = 0;
+				ev.proc_terminate.exitcode =
+				    WEXITSTATUS(kevp->data);
+			}
+			break;
+#endif
+		}
+		ev.userdata = kevp->udata;
+		if (kevp->flags & EV_ERROR)
+			ev.error = cloudabi_convert_errno(kevp->data);
+		++kevp;
+
+		error = copyout(&ev, out++, sizeof(ev));
+		if (error != 0)
+			return (error);
+	}
+	return (0);
+}
+
+static struct kevent_ops cloudabi64_kevent_ops = {
+	.keo_fetch_changes	= cloudabi64_kevent_fetch_changes,
+	.keo_put_events		= cloudabi64_kevent_put_events
+};
 
 int
 cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
@@ -139,6 +280,18 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 		}
 	}
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE) {
+		/* Anonymous poll call. */
+		error = kevent1_anonymous(retval,
+		    (const struct kevent *)SCARG(uap, in),
+		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
+		    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops);
+	} else {
+		/* Stateful poll call with a file descriptor. */
+		error = kevent1(retval, SCARG(uap, fd),
+		    (const struct kevent *)SCARG(uap, in),
+		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
+		    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops);
+	}
+	return (error);
 }

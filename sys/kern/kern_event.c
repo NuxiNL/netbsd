@@ -900,6 +900,16 @@ kevent1(register_t *retval, int fd,
 	return (error);
 }
 
+int
+kevent1_anonymous(register_t *retval, const struct kevent *changelist,
+    size_t nchanges, struct kevent *eventlist, size_t nevents,
+    const struct timespec *timeout, const struct kevent_ops *keops)
+{
+
+	/* TODO(ed): Implement. */
+	return (ENOSYS);
+}
+
 /*
  * Register a given kevent kev onto the kqueue
  */

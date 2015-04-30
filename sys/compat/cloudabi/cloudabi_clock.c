@@ -29,6 +29,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/param.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+#include <compat/cloudabi/cloudabi_util.h>
 
 /* Converts a CloudABI clock ID to a NetBSD clock ID. */
 static int
@@ -71,6 +72,24 @@ convert_timespec_to_timestamp(const struct timespec *in,
 	return (0);
 }
 
+/* Fetches the time value of a clock. */
+int
+cloudabi_clock_time_get(struct lwp *l, cloudabi_clockid_t clock_id,
+    cloudabi_timestamp_t *ret)
+{
+	struct timespec ts;
+	int error;
+	clockid_t clockid;
+
+	error = convert_clockid(clock_id, &clockid);
+	if (error != 0)
+		return (error);
+	error = clock_gettime1(clockid, &ts);
+	if (error != 0)
+		return (error);
+	return (convert_timespec_to_timestamp(&ts, ret));
+}
+
 int
 cloudabi_sys_clock_res_get(struct lwp *l,
     const struct cloudabi_sys_clock_res_get_args *uap, register_t *retval)
@@ -83,38 +102,23 @@ cloudabi_sys_clock_res_get(struct lwp *l,
 	error = convert_clockid(SCARG(uap, clock_id), &clockid);
 	if (error != 0)
 		return error;
-
 	error = clock_getres1(clockid, &ts);
 	if (error != 0)
 		return error;
-
 	error = convert_timespec_to_timestamp(&ts, &cts);
-	if (error != 0)
-		return error;
-	retval[0] = cts;
-	return (0);
+	if (error == 0)
+		retval[0] = cts;
+	return (error);
 }
 
 int
 cloudabi_sys_clock_time_get(struct lwp *l,
     const struct cloudabi_sys_clock_time_get_args *uap, register_t *retval)
 {
-	struct timespec ts;
-	cloudabi_timestamp_t cts;
+	cloudabi_timestamp_t ts;
 	int error;
-	clockid_t clockid;
 
-	error = convert_clockid(SCARG(uap, clock_id), &clockid);
-	if (error != 0)
-		return (error);
-
-	error = clock_gettime1(clockid, &ts);
-	if (error != 0)
-		return (error);
-
-	error = convert_timespec_to_timestamp(&ts, &cts);
-	if (error != 0)
-		return error;
-	retval[0] = cts;
-	return (0);
+	error = cloudabi_clock_time_get(l, SCARG(uap, clock_id), &ts);
+	retval[0] = ts;
+	return (error);
 }

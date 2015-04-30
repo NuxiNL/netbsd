@@ -40,6 +40,10 @@ struct nameidata;
 #define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
 	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
+/* Fetches the time value of a clock. */
+int cloudabi_clock_time_get(struct lwp *, cloudabi_clockid_t,
+    cloudabi_timestamp_t *);
+
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
 
