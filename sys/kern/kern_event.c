@@ -905,9 +905,19 @@ kevent1_anonymous(register_t *retval, const struct kevent *changelist,
     size_t nchanges, struct kevent *eventlist, size_t nevents,
     const struct timespec *timeout, const struct kevent_ops *keops)
 {
+	struct sys_close_args sys_close_args;
+	register_t fd[2];
+	int error;
 
-	/* TODO(ed): Implement. */
-	return (ENOSYS);
+	/* TODO(ed): Implement this without using a file descriptor. */
+	error = kqueue1(curlwp, 0, fd);
+	if (error != 0)
+		return (error);
+	error = kevent1(retval, fd[0], changelist, nchanges, eventlist, nevents,
+	    timeout, keops);
+	SCARG(&sys_close_args, fd) = fd[0];
+	sys_close(curlwp, &sys_close_args, fd);
+	return (error);
 }
 
 /*
