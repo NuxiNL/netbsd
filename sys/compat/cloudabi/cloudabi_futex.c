@@ -228,9 +228,8 @@ futex_address_create(struct futex_address *fa, struct lwp *l,
 		return (EFAULT);
 	}
 
-	if (entry->inheritance == MAP_INHERIT_SHARE) {
+	if (UVM_ET_ISOBJ(entry) && entry->inheritance == MAP_INHERIT_SHARE) {
 		/* Address corresponds with shared mapping. */
-		KASSERT(UVM_ET_ISOBJ(entry));
 		vo = entry->object.uvm_obj;
 		fa->fa_vmspace = NULL;
 		fa->fa_vmobject = vo;
