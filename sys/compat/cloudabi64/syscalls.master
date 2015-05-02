@@ -169,7 +169,7 @@
 		    cloudabi64_size_t fdscnt); }
 41	STD	{ void|cloudabi_sys||proc_exit( \
 		    cloudabi_exitcode_t rval); }
-42	STD	{ cloudabi_fd_t|cloudabi_sys||proc_fork(); }
+42	STD	{ cloudabi_fd_t|cloudabi64_sys||proc_fork(); }
 43	STD	{ void|cloudabi_sys||proc_raise( \
 		    cloudabi_signal_t sig); }
 

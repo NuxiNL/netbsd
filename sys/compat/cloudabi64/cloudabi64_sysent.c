@@ -218,7 +218,7 @@ struct sysent cloudabi64_sysent[] = {
 		.sy_call = (sy_call_t *)cloudabi_sys_proc_exit
 	},		/* 41 = proc_exit */
 	{
-		.sy_call = (sy_call_t *)cloudabi_sys_proc_fork
+		.sy_call = (sy_call_t *)cloudabi64_sys_proc_fork
 	},		/* 42 = proc_fork */
 	{
 		ns(struct cloudabi_sys_proc_raise_args),

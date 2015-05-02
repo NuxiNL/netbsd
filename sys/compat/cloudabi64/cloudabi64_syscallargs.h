@@ -496,7 +496,7 @@ int	cloudabi64_sys_proc_exec(struct lwp *, const struct cloudabi64_sys_proc_exec
 
 int	cloudabi_sys_proc_exit(struct lwp *, const struct cloudabi_sys_proc_exit_args *, register_t *);
 
-int	cloudabi_sys_proc_fork(struct lwp *, const void *, register_t *);
+int	cloudabi64_sys_proc_fork(struct lwp *, const void *, register_t *);
 
 int	cloudabi_sys_proc_raise(struct lwp *, const struct cloudabi_sys_proc_raise_args *, register_t *);
 

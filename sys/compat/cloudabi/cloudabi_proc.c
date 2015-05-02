@@ -87,13 +87,6 @@ cloudabi_sys_proc_exit(struct lwp *l,
 }
 
 int
-cloudabi_sys_proc_fork(struct lwp *l, const void *uap, register_t *retval)
-{
-
-	return (ENOSYS);
-}
-
-int
 cloudabi_sys_proc_raise(struct lwp *l,
     const struct cloudabi_sys_proc_raise_args *uap, register_t *retval)
 {
