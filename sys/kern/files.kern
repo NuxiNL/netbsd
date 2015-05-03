@@ -162,6 +162,7 @@ file	kern/sys_mqueue.c		mqueue
 file	kern/sys_lwp.c			kern
 file	kern/sys_pipe.c			!pipe_socketpair
 file	kern/sys_pmc.c			kern
+file	kern/sys_procdesc.c		kern
 file	kern/sys_process.c		ptrace | ktrace
 file	kern/sys_pset.c			kern
 file	kern/sys_select.c		kern

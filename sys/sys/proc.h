@@ -210,6 +210,7 @@ struct emul {
  * (:	updated atomically
  * ::	unlocked, stable
  */
+struct procdesc;
 struct vmspace;
 
 struct proc {
@@ -326,6 +327,7 @@ struct proc {
 	struct mdproc	p_md;		/* p: Any machine-dependent fields */
 	vaddr_t		p_stackbase;	/* :: ASLR randomized stack base */
 	struct kdtrace_proc *p_dtrace;	/* :: DTrace-specific data. */
+	struct procdesc *p_procdesc;	/* :: Process descriptor. */
 };
 
 #define	p_rlimit	p_limit->pl_rlimit

@@ -78,6 +78,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_fork.c,v 1.193 2013/11/22 21:04:11 christos Exp
 #include <sys/pool.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
+#include <sys/procdesc.h>
 #include <sys/ras.h>
 #include <sys/resourcevar.h>
 #include <sys/vnode.h>
@@ -220,6 +221,8 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 	int		tnprocs;
 	int		tracefork;
 	int		error = 0;
+	file_t *	fp_procdesc;
+	int		fd_procdesc;
 
 	p1 = l1->l_proc;
 	uid = kauth_cred_getuid(l1->l_cred);
@@ -271,6 +274,19 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 		(void)chgproccnt(uid, -1);
 		atomic_dec_uint(&nprocs);
 		return ENOMEM;
+	}
+
+	/*
+	 * Allocate the file descriptor needed for the process descriptor.
+	 */
+	if ((flags & FORK_PROCDESC) != 0) {
+		error = fd_allocfile(&fp_procdesc, &fd_procdesc);
+		if (error != 0) {
+			(void)chgproccnt(uid, -1);
+			atomic_dec_uint(&nprocs);
+			uvm_uarea_free(uaddr);
+			return (error);
+		}
 	}
 
 	/*
@@ -443,6 +459,10 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 	 */
 	l2->l_private = l1->l_private;
 
+	/* Create process descriptor. */
+	if ((flags & FORK_PROCDESC) != 0)
+		procdesc_new(p2);
+
 	/*
 	 * If emulation has a process fork hook, call it now.
 	 */
@@ -574,11 +594,12 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 	}
 
 	/*
-	 * Return child pid to parent process,
+	 * Return child pid or the process descriptor to parent process,
 	 * marking us as parent via retval[1].
 	 */
 	if (retval != NULL) {
-		retval[0] = p2->p_pid;
+		retval[0] = (flags & FORK_PROCDESC) != 0 ?
+		    fd_procdesc : p2->p_pid;
 		retval[1] = 0;
 	}
 	mutex_exit(p2->p_lock);
@@ -608,6 +629,11 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 		kpsignal(p1, &ksi, NULL);
 	}
 	mutex_exit(proc_lock);
+
+	if ((flags & FORK_PROCDESC) != 0) {
+		procdesc_finit(p2->p_procdesc, fp_procdesc);
+		fd_affix(p1, fp_procdesc, fd_procdesc);
+	}
 
 	return 0;
 }

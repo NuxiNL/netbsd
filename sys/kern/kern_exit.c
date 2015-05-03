@@ -81,6 +81,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_exit.c,v 1.244 2014/05/05 15:45:32 christos Exp
 #include <sys/resource.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/procdesc.h>
 #include <sys/buf.h>
 #include <sys/wait.h>
 #include <sys/file.h>
@@ -521,10 +522,12 @@ exit1(struct lwp *l, int rv)
 	/* Reload parent pointer, since p may have been reparented above */
 	new_parent = p->p_pptr;
 
-	if (__predict_false((p->p_slflag & PSL_FSTRACE) == 0 &&
-	    p->p_exitsig != 0)) {
-		exit_psignal(p, new_parent, &ksi);
-		kpsignal(new_parent, &ksi, NULL);
+	if (__predict_false((p->p_slflag & PSL_FSTRACE) == 0)) {
+		if ((p->p_procdesc == NULL || procdesc_exit(p)) &&
+		    p->p_exitsig != 0) {
+			exit_psignal(p, new_parent, &ksi);
+			kpsignal(new_parent, &ksi, NULL);
+		}
 	}
 
 	/* Calculate the final rusage info.  */
@@ -850,7 +853,8 @@ proc_free(struct proc *p, struct rusage *ru)
 		parent = (p->p_opptr == NULL) ? initproc : p->p_opptr;
 		proc_reparent(p, parent);
 		p->p_opptr = NULL;
-		if (p->p_exitsig != 0) {
+		if ((p->p_procdesc == NULL || procdesc_exit(p)) &&
+		    p->p_exitsig != 0) {
 			exit_psignal(p, parent, &ksi);
 			kpsignal(parent, &ksi, NULL);
 		}
@@ -896,6 +900,12 @@ proc_free(struct proc *p, struct rusage *ru)
 	 * Releases the proc_lock.
 	 */
 	proc_leavepgrp(p);
+
+	/*
+	 * Reap the process descriptor.
+	 */
+	if (p->p_procdesc != NULL)
+		procdesc_reap(p);
 
 	/*
 	 * Delay release until after lwp_free.
