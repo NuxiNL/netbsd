@@ -142,6 +142,7 @@ struct file {
 #define f_data		f_undata.fd_data
 #define f_mqueue	f_undata.fd_mq
 #define f_ksem		f_undata.fd_ks
+#define f_procdesc	f_undata.fd_pd
 
 #define f_rndctx	f_undata.fd_rndctx
 #define f_devunit	f_undata.fd_devunit

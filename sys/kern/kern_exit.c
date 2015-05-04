@@ -119,7 +119,6 @@ int debug_exit = 0;
 #endif
 
 static int find_stopped_child(struct proc *, pid_t, int, struct proc **, int *);
-static void proc_free(struct proc *, struct rusage *);
 
 /*
  * DTrace SDT provider definitions
@@ -823,7 +822,7 @@ find_stopped_child(struct proc *parent, pid_t pid, int options,
  *
  * *ru is returned to the caller, and must be freed by the caller.
  */
-static void
+void
 proc_free(struct proc *p, struct rusage *ru)
 {
 	struct proc *parent = p->p_pptr;
@@ -896,16 +895,16 @@ proc_free(struct proc *p, struct rusage *ru)
 	proc_free_pid(p->p_pid);
 
 	/*
-	 * Unlink process from its process group.
-	 * Releases the proc_lock.
-	 */
-	proc_leavepgrp(p);
-
-	/*
 	 * Reap the process descriptor.
 	 */
 	if (p->p_procdesc != NULL)
 		procdesc_reap(p);
+
+	/*
+	 * Unlink process from its process group.
+	 * Releases the proc_lock.
+	 */
+	proc_leavepgrp(p);
 
 	/*
 	 * Delay release until after lwp_free.

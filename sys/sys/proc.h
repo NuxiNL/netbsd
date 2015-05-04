@@ -296,6 +296,7 @@ struct proc {
 	struct lcproc	*p_lwpctl;	/* p, a: _lwp_ctl() information */
 	pid_t		p_ppid;		/* :: cached parent pid */
 	pid_t 		p_fpid;		/* :: forked pid */
+	struct procdesc *p_procdesc;	/* :: Process descriptor. */
 
 /*
  * End area that is zeroed on creation
@@ -327,7 +328,6 @@ struct proc {
 	struct mdproc	p_md;		/* p: Any machine-dependent fields */
 	vaddr_t		p_stackbase;	/* :: ASLR randomized stack base */
 	struct kdtrace_proc *p_dtrace;	/* :: DTrace-specific data. */
-	struct procdesc *p_procdesc;	/* :: Process descriptor. */
 };
 
 #define	p_rlimit	p_limit->pl_rlimit
@@ -482,6 +482,7 @@ int	do_sys_wait(int *, int *, int, struct rusage *);
 struct proc *proc_alloc(void);
 void	proc0_init(void);
 pid_t	proc_alloc_pid(struct proc *);
+void	proc_free(struct proc *, struct rusage *);
 void	proc_free_pid(pid_t);
 void	proc_free_mem(struct proc *);
 void	exit_lwps(struct lwp *l);
