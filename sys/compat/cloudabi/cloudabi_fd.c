@@ -235,6 +235,8 @@ cloudabi_convert_filetype(const struct file *fp, mode_t mode)
 	if (fp != NULL) {
 		if (fp->f_type == DTYPE_KQUEUE)
 			return (CLOUDABI_FILETYPE_POLL);
+		else if (fp->f_type == DTYPE_PROCDESC)
+			return (CLOUDABI_FILETYPE_PROCESS);
 		else if (fp->f_type == DTYPE_SOCKET) {
 			so = fp->f_socket;
 			switch (so->so_type) {

@@ -108,6 +108,7 @@ union file_data {
 	struct fcrypt *fd_fcrypt;	// DTYPE_CRYPTO is not used
 	struct mqueue *fd_mq;		// DTYPE_MQUEUE
 	struct ksem *fd_ks;		// DTYPE_SEM
+	struct procdesc *fd_pd;		// DTYPE_PROCDESC;
 };
 
 /*
@@ -160,10 +161,11 @@ struct file {
 #define	DTYPE_CRYPTO	6		/* crypto */
 #define	DTYPE_MQUEUE	7		/* message queue */
 #define	DTYPE_SEM	8		/* semaphore */
+#define	DTYPE_PROCDESC	9		/* process descriptor */
 
 #define DTYPE_NAMES	\
     "0", "file", "socket", "pipe", "kqueue", "misc", "crypto", "mqueue", \
-    "semaphore"
+    "semaphore", "procdesc"
 
 #ifdef _KERNEL
 
