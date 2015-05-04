@@ -28,11 +28,50 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/event.h>
+#include <sys/wait.h>
 
 #include <compat/cloudabi/cloudabi_util.h>
 
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
+
+/* Converts a NetBSD signal number to a CloudABI signal number. */
+static cloudabi_signal_t
+convert_signal(int sig)
+{
+	static const cloudabi_signal_t signals[] = {
+		[SIGABRT] = CLOUDABI_SIGABRT,
+		[SIGALRM] = CLOUDABI_SIGALRM,
+		[SIGBUS] = CLOUDABI_SIGBUS,
+		[SIGCHLD] = CLOUDABI_SIGCHLD,
+		[SIGCONT] = CLOUDABI_SIGCONT,
+		[SIGFPE] = CLOUDABI_SIGFPE,
+		[SIGHUP] = CLOUDABI_SIGHUP,
+		[SIGILL] = CLOUDABI_SIGILL,
+		[SIGINT] = CLOUDABI_SIGINT,
+		[SIGKILL] = CLOUDABI_SIGKILL,
+		[SIGPIPE] = CLOUDABI_SIGPIPE,
+		[SIGQUIT] = CLOUDABI_SIGQUIT,
+		[SIGSEGV] = CLOUDABI_SIGSEGV,
+		[SIGSTOP] = CLOUDABI_SIGSTOP,
+		[SIGSYS] = CLOUDABI_SIGSYS,
+		[SIGTERM] = CLOUDABI_SIGTERM,
+		[SIGTRAP] = CLOUDABI_SIGTRAP,
+		[SIGTSTP] = CLOUDABI_SIGTSTP,
+		[SIGTTIN] = CLOUDABI_SIGTTIN,
+		[SIGTTOU] = CLOUDABI_SIGTTOU,
+		[SIGURG] = CLOUDABI_SIGURG,
+		[SIGUSR1] = CLOUDABI_SIGUSR1,
+		[SIGUSR2] = CLOUDABI_SIGUSR2,
+		[SIGVTALRM] = CLOUDABI_SIGVTALRM,
+		[SIGXCPU] = CLOUDABI_SIGXCPU,
+		[SIGXFSZ] = CLOUDABI_SIGXFSZ,
+	};
+
+	if (sig >= 0 && sig < __arraycount(signals) && signals[sig] != 0)
+		return (signals[sig]);
+	return (SIGABRT);
+}
 
 /* Converts CloudABI's event objects to NetBSD's struct kevent. */
 static int
@@ -87,16 +126,14 @@ cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
 			kevp->fflags = 0;
 			kevp->data = 0;
 			break;
-#if 0 /* TODO(ed): Implement. */
 		case CLOUDABI_EVENT_TYPE_PROC_TERMINATE:
 			kevp->filter = EVFILT_PROCDESC;
 			kevp->ident = ev.proc_terminate.fd;
 			kevp->fflags = NOTE_EXIT;
 			kevp->data = 0;
 			break;
-#endif
 		default:
-			kevp->filter = 0;
+			kevp->filter = UINT32_MAX;
 			kevp->ident = 0;
 			kevp->fflags = 0;
 			kevp->data = 0;
@@ -139,7 +176,6 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 				    CLOUDABI_EVENT_FD_READWRITE_HANGUP;
 			}
 			break;
-#if 0 /* TODO(ed): Implement. */
 		case EVFILT_PROCDESC:
 			ev.type = CLOUDABI_EVENT_TYPE_PROC_TERMINATE;
 			ev.proc_terminate.fd = kevp->ident;
@@ -155,7 +191,6 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 				    WEXITSTATUS(kevp->data);
 			}
 			break;
-#endif
 		}
 		ev.userdata = kevp->udata;
 		if (kevp->flags & EV_ERROR)

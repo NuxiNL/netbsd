@@ -43,7 +43,8 @@
 #define	EVFILT_PROC		4U	/* attached to struct proc */
 #define	EVFILT_SIGNAL		5U	/* attached to struct proc */
 #define	EVFILT_TIMER		6U	/* arbitrary timer (in ms) */
-#define	EVFILT_SYSCOUNT		7U	/* number of filters */
+#define	EVFILT_PROCDESC		7U	/* attached to process descriptors */
+#define	EVFILT_SYSCOUNT		8U	/* number of filters */
 
 #define	EV_SET(kevp, a, b, c, d, e, f)					\
 do {									\

@@ -160,6 +160,7 @@ static struct kfilter sys_kfilters[] = {
 	{ "EVFILT_PROC",	EVFILT_PROC,	0, &proc_filtops, 0 },
 	{ "EVFILT_SIGNAL",	EVFILT_SIGNAL,	0, &sig_filtops, 0 },
 	{ "EVFILT_TIMER",	EVFILT_TIMER,	0, &timer_filtops, 0 },
+	{ "EVFILT_PROCDESC",	EVFILT_PROCDESC,0, &file_filtops, 0 },
 	{ NULL,			0,		0, NULL, 0 },
 };
 
