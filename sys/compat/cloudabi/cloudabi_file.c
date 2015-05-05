@@ -129,7 +129,7 @@ cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 }
 
 /* Returns the vnode corresponding with a base directory and pathname. */
-static int
+int
 cloudabi_namei_simple(struct lwp *l, cloudabi_lookup_t fd, const char *path,
     size_t pathlen, unsigned int flags, struct vnode **vp)
 {

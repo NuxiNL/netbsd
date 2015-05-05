@@ -214,7 +214,7 @@ uipc_init(void)
  * lock (the listening socket's lock, the head) access can still only be
  * made to one side of the connection.
  */
-static void
+void
 unp_setpeerlocks(struct socket *so, struct socket *so2)
 {
 	struct unpcb *unp;
@@ -269,7 +269,7 @@ unp_setpeerlocks(struct socket *so, struct socket *so2)
 /*
  * Reset a socket's lock back to the domain-wide lock.
  */
-static void
+void
 unp_resetlock(struct socket *so)
 {
 	kmutex_t *olock, *nlock;
@@ -1091,7 +1091,7 @@ unp_abort(struct socket *so)
 	return 0;
 }
 
-static int
+int
 unp_connect1(struct socket *so, struct socket *so2, struct lwp *l)
 {
 	struct unpcb *unp = sotounpcb(so);

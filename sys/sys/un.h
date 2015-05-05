@@ -85,9 +85,12 @@ kmutex_t *uipc_streamlock(void);
 kmutex_t *uipc_rawlock(void);
 
 int	unp_connect(struct socket *, struct mbuf *, struct lwp *);
+int	unp_connect1(struct socket *, struct socket *, struct lwp *);
 int	unp_connect2(struct socket *, struct socket *);
 void 	unp_dispose(struct mbuf *);
 int 	unp_externalize(struct mbuf *, struct lwp *, int);
+void	unp_resetlock(struct socket *);
+void	unp_setpeerlocks(struct socket *, struct socket *);
 
 #else /* !_KERNEL */
 

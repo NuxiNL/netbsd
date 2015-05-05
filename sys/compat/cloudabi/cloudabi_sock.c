@@ -111,7 +111,7 @@ cloudabi_sys_sock_bind(struct lwp *l,
 		solock(so);
 		goto out2;
 	}
-	CLOUDABI_NDINIT(&nd, CREATE, FOLLOW | LOCKPARENT | SANDBOXINDIR, pb);
+	CLOUDABI_NDINIT(&nd, CREATE, FOLLOW | LOCKPARENT, pb);
 	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
 	if (error != 0) {
 		solock(so);
@@ -170,8 +170,123 @@ int
 cloudabi_sys_sock_connect(struct lwp *l,
     const struct cloudabi_sys_sock_connect_args *uap, register_t *retval)
 {
+	struct socket *so, *so2, *so3;
+	struct unpcb *unp, *unp2, *unp3;
+	struct vnode *vp;
+	int error;
 
-	return (ENOSYS);
+	error = fd_getsock(SCARG(uap, s), &so);
+	if (error != 0)
+		return (error);
+	solock(so);
+	if (so->so_options & SO_ACCEPTCONN) {
+		/* Socket is already accepting connections. */
+		error = EOPNOTSUPP;
+		goto out1;
+	} else if (so->so_state & (SS_ISCONNECTED|SS_ISCONNECTING) &&
+	    ((so->so_proto->pr_flags & PR_CONNREQUIRED) ||
+	    (error = sodisconnect(so)))) {
+		/* Socket is already connected. */
+		error = EISCONN;
+		goto out1;
+	} else if (so->so_proto->pr_domain->dom_family != AF_UNIX) {
+		/* Not a UNIX socket. */
+		error = EAFNOSUPPORT;
+		goto out1;
+	}
+	unp = sotounpcb(so);
+	if ((unp->unp_flags & UNP_BUSY) != 0) {
+		/* Bind or connect already in progress. */
+		error = EALREADY;
+		goto out1;
+	}
+	unp->unp_flags |= UNP_BUSY;
+	sounlock(so);
+
+	/* Look up the target path. */
+	error = cloudabi_namei_simple(l,
+	    SCARG(uap, fd) | CLOUDABI_LOOKUP_SYMLINK_FOLLOW, SCARG(uap, path),
+	    SCARG(uap, pathlen), LOCKLEAF, &vp);
+	if (error != 0) {
+		solock(so);
+		goto out2;
+	}
+	if (vp->v_type != VSOCK) {
+		error = ENOTSOCK;
+		solock(so);
+		goto out3;
+	}
+	error = VOP_ACCESS(vp, VWRITE, l->l_cred);
+	if (error != 0) {
+		solock(so);
+		goto out3;
+	}
+
+	/*
+	 * Look up the destination socket and reset the lock on the source
+	 * socket, so that acquiring the socket lock locks both.
+	 */
+	mutex_enter(vp->v_interlock);
+	so2 = vp->v_socket;
+	if (so2 == NULL || so->so_type != so2->so_type) {
+		mutex_exit(vp->v_interlock);
+		error = so2 == NULL ? ECONNREFUSED : EPROTOTYPE;
+		solock(so);
+		goto out3;
+	}
+	solock(so);
+	unp_resetlock(so);
+	mutex_exit(vp->v_interlock);
+
+	/* Attempt to connect to the socket. */
+	if ((so->so_proto->pr_flags & PR_CONNREQUIRED) != 0) {
+		if ((so2->so_options & SO_ACCEPTCONN) == 0 ||
+		    (so3 = sonewconn(so2, false)) == NULL) {
+			error = ECONNREFUSED;
+			goto out3;
+		}
+		unp2 = sotounpcb(so2);
+		unp3 = sotounpcb(so3);
+		if (unp2->unp_addr) {
+			unp3->unp_addr = malloc(unp2->unp_addrlen,
+			    M_SONAME, M_WAITOK);
+			memcpy(unp3->unp_addr, unp2->unp_addr,
+			    unp2->unp_addrlen);
+			unp3->unp_addrlen = unp2->unp_addrlen;
+		}
+		unp3->unp_flags = unp2->unp_flags;
+		so2 = so3;
+	}
+	error = unp_connect1(so, so2, l);
+	if (error)
+		goto out3;
+	unp2 = sotounpcb(so2);
+	if (so->so_type == SOCK_SEQPACKET || so->so_type == SOCK_STREAM) {
+		unp2->unp_conn = unp;
+		if ((unp->unp_flags | unp2->unp_flags) & UNP_CONNWAIT)
+			soisconnecting(so);
+		else
+			soisconnected(so);
+		soisconnected(so2);
+		/*
+		 * If the connection is fully established, break the
+		 * association with uipc_lock and give the connected
+		 * pair a seperate lock to share.
+		 */
+		KASSERT(so2->so_head != NULL);
+		unp_setpeerlocks(so, so2);
+	}
+
+	/* TODO(ed): Call sowait() if still connecting. */
+
+out3:
+	vput(vp);
+out2:
+	unp->unp_flags &= ~UNP_BUSY;
+out1:
+	sounlock(so);
+	fd_putfile(SCARG(uap, s));
+	return (error);
 }
 
 int

@@ -33,12 +33,17 @@
 struct lwp;
 struct mbuf;
 struct nameidata;
+struct vnode;
 
 /* Mode for new files created by CloudABI processed. */
 #define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
 /* Calls NDINIT() with SANDBOXINDIR set. */
 #define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
 	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
+
+/* Returns the vnode corresponding with a base directory and pathname. */
+int cloudabi_namei_simple(struct lwp *, cloudabi_lookup_t, const char *,
+    size_t, unsigned int, struct vnode **);
 
 /* Fetches the time value of a clock. */
 int cloudabi_clock_time_get(struct lwp *, cloudabi_clockid_t,
