@@ -34,6 +34,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/socketvar.h>
 #include <sys/stat.h>
 #include <sys/syscallargs.h>
+#include <sys/vnode.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_util.h>
@@ -222,52 +223,58 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
 	return (sys_lseek(l, &sys_lseek_args, retval));
 }
 
-/*
- * Converts a mode_t and an optional file descriptor to a CloudABI file
- * descriptor type.
- */
-cloudabi_filetype_t
-cloudabi_convert_filetype(const struct file *fp, mode_t mode)
+/* Converts a file descriptor to a CloudABI file descriptor type. */
+static cloudabi_filetype_t
+convert_filetype(const struct file *fp)
 {
-	struct socket *so;
 
-	/* Infer type from file descriptor if provided. */
-	if (fp != NULL) {
-		if (fp->f_type == DTYPE_KQUEUE)
-			return (CLOUDABI_FILETYPE_POLL);
-		else if (fp->f_type == DTYPE_PROCDESC)
-			return (CLOUDABI_FILETYPE_PROCESS);
-		else if (fp->f_type == DTYPE_SOCKET) {
-			so = fp->f_socket;
-			switch (so->so_type) {
-			case SOCK_DGRAM:
-				return (CLOUDABI_FILETYPE_SOCKET_DGRAM);
-			case SOCK_SEQPACKET:
-				return (CLOUDABI_FILETYPE_SOCKET_SEQPACKET);
-			default:
-				return (CLOUDABI_FILETYPE_SOCKET_STREAM);
-			}
+	switch (fp->f_type) {
+	case DTYPE_KQUEUE:
+		return (CLOUDABI_FILETYPE_POLL);
+	case DTYPE_PIPE:
+		return (CLOUDABI_FILETYPE_FIFO);
+	case DTYPE_PROCDESC:
+		return (CLOUDABI_FILETYPE_PROCESS);
+	case DTYPE_SOCKET: {
+		struct socket *so;
+
+		so = fp->f_socket;
+		switch (so->so_type) {
+		case SOCK_DGRAM:
+			return (CLOUDABI_FILETYPE_SOCKET_DGRAM);
+		case SOCK_SEQPACKET:
+			return (CLOUDABI_FILETYPE_SOCKET_SEQPACKET);
+		default:
+			return (CLOUDABI_FILETYPE_SOCKET_STREAM);
 		}
 	}
+	case DTYPE_VNODE: {
+		struct vnode *vp;
 
-	/* Infer type from stat mode. */
-	if (S_ISBLK(mode))
-		return (CLOUDABI_FILETYPE_BLOCK_DEVICE);
-	else if (S_ISCHR(mode))
-		return (CLOUDABI_FILETYPE_CHARACTER_DEVICE);
-	else if (S_ISDIR(mode))
-		return (CLOUDABI_FILETYPE_DIRECTORY);
-	else if (S_ISFIFO(mode))
-		return (CLOUDABI_FILETYPE_FIFO);
-	else if (S_ISREG(mode))
-		return (CLOUDABI_FILETYPE_REGULAR_FILE);
-	else if (S_ISSOCK(mode)) {
-		/* Inaccurate, but the best that we can do. */
-		return (CLOUDABI_FILETYPE_SOCKET_STREAM);
-	} else if (S_ISLNK(mode))
-		return (CLOUDABI_FILETYPE_SYMBOLIC_LINK);
+		vp = fp->f_vnode;
+		switch (vp->v_type) {
+		case VBLK:
+			return (CLOUDABI_FILETYPE_BLOCK_DEVICE);
+		case VCHR:
+			return (CLOUDABI_FILETYPE_CHARACTER_DEVICE);
+		case VDIR:
+			return (CLOUDABI_FILETYPE_DIRECTORY);
+		case VFIFO:
+			return (CLOUDABI_FILETYPE_FIFO);
+		case VLNK:
+			return (CLOUDABI_FILETYPE_SYMBOLIC_LINK);
+		case VREG:
+			return (CLOUDABI_FILETYPE_REGULAR_FILE);
+		case VSOCK:
+			return (CLOUDABI_FILETYPE_SOCKET_STREAM);
+		default:
+			return (CLOUDABI_FILETYPE_UNKNOWN);
+		}
+	}
+	default:
+		return (CLOUDABI_FILETYPE_UNKNOWN);
+	}
 
-	return (CLOUDABI_FILETYPE_UNKNOWN);
 }
 
 int
@@ -275,7 +282,6 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
     const struct cloudabi_sys_fd_stat_get_args *uap, register_t *retval)
 {
 	cloudabi_fdstat_t fsb = {
-		.fs_filetype		= CLOUDABI_FILETYPE_DIRECTORY,
 		.fs_rights_base		= ~0,
 		.fs_rights_inheriting	= ~0,
 	};
@@ -287,6 +293,7 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 		return (EBADF);
 	oflags = OFLAGS(fp->f_flag);
 	fd_putfile(SCARG(uap, fd));
+	fsb.fs_filetype = convert_filetype(fp);
 
 	/* Convert file descriptor flags. */
 	if (oflags & O_APPEND)

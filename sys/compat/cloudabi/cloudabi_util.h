@@ -54,12 +54,6 @@ int cloudabi_clock_time_get(struct lwp *, cloudabi_clockid_t,
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
 
-/*
- * Converts a mode_t and an optional file descriptor to a CloudABI file
- * descriptor type.
- */
-cloudabi_filetype_t cloudabi_convert_filetype(const struct file *, mode_t);
-
 /* Performs a namei lookup with a base directory as a file descriptor. */
 int cloudabi_namei(struct lwp *, cloudabi_fd_t, struct nameidata *);
 
