@@ -329,8 +329,49 @@ int
 cloudabi_sys_sock_stat_get(struct lwp *l,
     const struct cloudabi_sys_sock_stat_get_args *uap, register_t *retval)
 {
+	cloudabi_sockstat_t ss;
+	struct mbuf *name;
+	struct socket *so;
+	int error;
 
-	return (ENOSYS);
+	error = fd_getsock(SCARG(uap, fd), &so);
+	if (error != 0)
+		return (error);
+	memset(&ss, '\0', sizeof(ss));
+	solock(so);
+
+	/* Set ss_sockname. */
+	name = m_getclr(M_WAIT, MT_SONAME);
+	MCLAIM(name, so->so_mowner);
+	error = so->so_proto->pr_usrreqs->pr_sockaddr(so, name);
+	if (error == 0)
+		cloudabi_convert_sockaddr(mtod(name, void *), name->m_len,
+		    &ss.ss_sockname);
+	m_free(name);
+
+	/* Set ss_peername. */
+	if ((so->so_state & SS_ISCONNECTED) != 0) {
+		name = m_getclr(M_WAIT, MT_SONAME);
+		MCLAIM(name, so->so_mowner);
+		error = so->so_proto->pr_usrreqs->pr_peeraddr(so, name);
+		if (error == 0)
+			cloudabi_convert_sockaddr(mtod(name, void *),
+			    name->m_len, &ss.ss_peername);
+		m_free(name);
+	}
+
+	/* Set ss_error. */
+	ss.ss_error = so->so_error;
+	if ((SCARG(uap, flags) & CLOUDABI_SOCKSTAT_CLEAR_ERROR) != 0)
+		so->so_error = 0;
+
+	/* Set ss_state. */
+	if ((so->so_options & SO_ACCEPTCONN) == 0)
+		ss.ss_state |= CLOUDABI_SOCKSTAT_ACCEPTCONN;
+
+	sounlock(so);
+	fd_putfile(SCARG(uap, fd));
+	return (copyout(&ss, SCARG(uap, buf), sizeof(ss)));
 }
 
 int
