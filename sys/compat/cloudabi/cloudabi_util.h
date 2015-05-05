@@ -28,6 +28,8 @@
 #ifndef _CLOUDABI_UTIL_H_
 #define	_CLOUDABI_UTIL_H_
 
+#include <sys/socket.h>
+
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
 
 struct lwp;
@@ -62,7 +64,8 @@ cloudabi_filetype_t cloudabi_convert_filetype(const struct file *, mode_t);
 int cloudabi_namei(struct lwp *, cloudabi_fd_t, struct nameidata *);
 
 /* Converts NetBSD's struct sockaddr to CloudABI's cloudabi_sockaddr_t. */
-void cloudabi_convert_sockaddr(struct mbuf *, cloudabi_sockaddr_t *);
+void cloudabi_convert_sockaddr(const struct sockaddr *, socklen_t,
+    cloudabi_sockaddr_t *);
 
 /* Initialization of the futex pool. */
 void cloudabi_futex_init(void);

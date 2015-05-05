@@ -37,17 +37,49 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/unpcb.h>
 #include <sys/vnode.h>
 
+#include <netinet/in.h>
+
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_util.h>
 
 /* Converts NetBSD's struct sockaddr to CloudABI's cloudabi_sockaddr_t. */
 void
-cloudabi_convert_sockaddr(struct mbuf *name, cloudabi_sockaddr_t *rsa)
+cloudabi_convert_sockaddr(const struct sockaddr *sa, socklen_t sal,
+    cloudabi_sockaddr_t *rsa)
 {
 
-	/* TODO(ed): Implement. */
-	if (name != NULL)
-		m_free(name);
+	/* Zero-sized socket address. */
+	if (sal < offsetof(struct sockaddr, sa_family) + sizeof(sa->sa_family))
+		return;
+
+	switch (sa->sa_family) {
+	case AF_INET: {
+		const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+
+		rsa->sa_family = CLOUDABI_AF_INET;
+		if (sal < sizeof(struct sockaddr_in))
+			return;
+		memcpy(&rsa->sa_inet.addr, &sin->sin_addr,
+		    sizeof(rsa->sa_inet.addr));
+		rsa->sa_inet.port = ntohs(sin->sin_port);
+		return;
+	}
+	case AF_INET6: {
+		const struct sockaddr_in6 *sin6 =
+		    (const struct sockaddr_in6 *)sa;
+
+		rsa->sa_family = CLOUDABI_AF_INET6;
+		if (sal < sizeof(struct sockaddr_in6))
+			return;
+		memcpy(&rsa->sa_inet6.addr, &sin6->sin6_addr,
+		    sizeof(rsa->sa_inet6.addr));
+		rsa->sa_inet6.port = ntohs(sin6->sin6_port);
+		return;
+	}
+	case AF_UNIX:
+		rsa->sa_family = CLOUDABI_AF_UNIX;
+		return;
+	}
 }
 
 int
@@ -63,7 +95,11 @@ cloudabi_sys_sock_accept(struct lwp *l,
 		return (error);
 
 	memset(&ss, '\0', sizeof(ss));
-	cloudabi_convert_sockaddr(name, &ss.ss_peername);
+	if (name != NULL) {
+		cloudabi_convert_sockaddr(mtod(name, void *), name->m_len,
+		    &ss.ss_peername);
+		m_free(name);
+	}
 	if (SCARG(uap, buf) != NULL)
 		error = copyout(&ss, SCARG(uap, buf), sizeof(ss));
 	return (error);

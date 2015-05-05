@@ -80,7 +80,11 @@ cloudabi64_sys_sock_recv(struct lwp *l,
 	/* Convert results in msghdr to cloudabi_recv_out_t. */
 	memset(&ro, '\0', sizeof(ro));
 	ro.ro_datalen = retval2[0];
-	cloudabi_convert_sockaddr(from, &ro.ro_peername);
+	if (from != NULL) {
+		cloudabi_convert_sockaddr(mtod(from, void *), from->m_len,
+		    &ro.ro_peername);
+		m_free(from);
+	}
 	return (copyout(&ro, SCARG(uap, out), sizeof(ro)));
 }
 
