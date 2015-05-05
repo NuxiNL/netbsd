@@ -307,7 +307,7 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 	if (oflags & O_SYNC)
 		fsb.fs_flags |= CLOUDABI_FDFLAG_SYNC;
 
-	/* TODO(ed): Fix filetype and rights. */
+	/* TODO(ed): Return the rights. */
 	return (copyout(&fsb, SCARG(uap, buf), sizeof(fsb)));
 }
 
