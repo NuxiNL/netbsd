@@ -801,7 +801,7 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 {
 	struct timeval tv;
 	cloudabi_timestamp_t now;
-	int error;
+	int error, ticks;
 
 	/* Initialize futex_waiter object. */
 	fw->fw_tid = cloudabi_gettid(l);
@@ -828,11 +828,18 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 			break;
 		}
 
-		/* Convert to relative timeout and wait. */
+		/* Convert to number of ticks. */
 		tv.tv_sec = (timeout - now) / 1000000000;
 		tv.tv_usec = (timeout - now) % 1000000000 / 1000;
+		ticks = tvtohz(&tv);
+		if (ticks == 0) {
+			error = EWOULDBLOCK;
+			break;
+		}
+
+		/* Wait. */
 		error = cv_timedwait_sig(&fw->fw_wait, &futex_global_lock,
-		    tvtohz(&tv));
+		    ticks);
 		if (error != 0)
 			break;
 	} while (fw->fw_queue == fq);
