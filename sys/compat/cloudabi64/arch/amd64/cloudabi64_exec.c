@@ -32,6 +32,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/kmem.h>
 #include <sys/module.h>
 #include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/syscallvar.h>
 
 #include <machine/userret.h>
@@ -49,6 +50,9 @@ extern struct sysent cloudabi64_sysent[];
 static void
 cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
 {
+	static const struct sigaction sigign = {
+		.sa_handler = SIG_IGN,
+	};
 	struct trapframe *tf;
 
 	/*
@@ -62,6 +66,9 @@ cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
 	tf = l->l_md.md_regs;
 	tf->tf_rdi = stack;
 	tf->tf_rsi = sizeof(cloudabi64_startup_data_t);
+
+	/* Ignore SIGPIPE. */
+	sigaction1(l, SIGPIPE, &sigign, NULL, NULL, 0);
 }
 
 static void

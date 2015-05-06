@@ -28,6 +28,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/syscallargs.h>
 #include <sys/wait.h>
 
@@ -90,6 +91,9 @@ int
 cloudabi_sys_proc_raise(struct lwp *l,
     const struct cloudabi_sys_proc_raise_args *uap, register_t *retval)
 {
+	static const struct sigaction sigdfl = {
+		.sa_handler = SIG_DFL,
+	};
 	struct sys_kill_args sys_kill_args;
 	int error;
 
@@ -98,6 +102,7 @@ cloudabi_sys_proc_raise(struct lwp *l,
 	if (error != 0)
 		return (error);
 
-	/* TODO(ed): Set signal action back to default. */
+	/* Restore to default signal action and send signal. */
+	sigaction1(l, SCARG(&sys_kill_args, signum), &sigdfl, NULL, NULL, 0);
 	return (sys_kill(l, &sys_kill_args, retval));
 }
