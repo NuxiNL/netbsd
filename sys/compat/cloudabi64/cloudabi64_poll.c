@@ -111,6 +111,9 @@ cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
 			kevp->ident = ev.clock.identifier;
 			kevp->fflags = 0;
 			kevp->data = ts / 1000000;
+			/* Prevent returning EINVAL. */
+			if (kevp->data == 0)
+				kevp->data = 1;
 			break;
 		}
 		case CLOUDABI_EVENT_TYPE_FD_READ:
