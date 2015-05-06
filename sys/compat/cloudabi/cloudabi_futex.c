@@ -96,12 +96,22 @@ struct futex_waiter;
 
 /* Identifier of a location in memory. */
 struct futex_address {
-	/* If process-local: address space of the process. */
-	struct vmspace *		fa_vmspace;
-	/* If not process-local: VM object containing the object. */
-	struct uvm_object *		fa_vmobject;
+	/* Kind of key used to identify the address. */
+	enum {
+		FK_AMAP,
+		FK_OBJECT,
+		FK_SPACE,
+	}				fa_kind;
 
-	/* Memory address within address space or offset within VM object. */
+	/* Object describing the memory region containing the lock. */
+	union {
+		void *			opaque;
+		struct vm_amap *	amap;
+		struct uvm_object *	object;
+		struct vmspace *	space;
+	}				fa_value;
+
+	/* Offset within object of memory region. */
 	uintptr_t			fa_offset;
 };
 
@@ -141,7 +151,7 @@ struct futex_lock {
 	 * currently not owned by the kernel. LOCK_OWNER_UNKNOWN in case
 	 * the owner is not known (e.g., when the lock is read-locked).
 	 */
-	lwpid_t				fl_owner;
+	cloudabi_tid_t			fl_owner;
 #define LOCK_UNMANAGED 0x0
 #define LOCK_OWNER_UNKNOWN 0x1
 
@@ -159,7 +169,7 @@ struct futex_lock {
 /* Information associated with a thread blocked on an object. */
 struct futex_waiter {
 	/* Thread ID. */
-	lwpid_t				fw_tid;
+	cloudabi_tid_t			fw_tid;
 	/* Condition variable used for waiting. */
 	kcondvar_t			fw_wait;
 
@@ -197,7 +207,7 @@ static void futex_queue_requeue(struct futex_queue *, struct futex_queue *,
 static int futex_queue_sleep(struct futex_queue *, struct futex_lock *,
     struct futex_waiter *, struct lwp *, cloudabi_clockid_t,
     cloudabi_timestamp_t, cloudabi_timestamp_t);
-static lwpid_t futex_queue_tid_best(const struct futex_queue *);
+static cloudabi_tid_t futex_queue_tid_best(const struct futex_queue *);
 static void futex_queue_wake_up_all(struct futex_queue *);
 static void futex_queue_wake_up_best(struct futex_queue *);
 static void futex_queue_wake_up_donate(struct futex_queue *, unsigned int);
@@ -214,6 +224,7 @@ static int
 futex_address_create(struct futex_address *fa, struct lwp *l,
     const void *object)
 {
+	struct vm_amap *va;
 	struct uvm_object *vo;
 	struct vmspace *vs;
 	struct vm_map *map;
@@ -227,19 +238,28 @@ futex_address_create(struct futex_address *fa, struct lwp *l,
 		vm_map_unlock(map);
 		return (EFAULT);
 	}
+	KASSERT(!UVM_ET_ISSUBMAP(entry));
 
-	if (UVM_ET_ISOBJ(entry) && entry->inheritance == MAP_INHERIT_SHARE) {
-		/* Address corresponds with shared mapping. */
+	if (entry->inheritance != MAP_INHERIT_SHARE) {
+		/* Address corresponds with process-local mapping. */
+		fa->fa_kind = FK_SPACE;
+		fa->fa_value.space = vs;
+		fa->fa_offset = (uintptr_t)object;
+	} else if (entry->object.uvm_obj != NULL) {
+		/* Shared mapping to a file. */
+		fa->fa_kind = FK_OBJECT;
 		vo = entry->object.uvm_obj;
-		fa->fa_vmspace = NULL;
-		fa->fa_vmobject = vo;
+		fa->fa_value.object = vo;
 		vo->pgops->pgo_reference(vo);
 		fa->fa_offset = entry->offset - entry->start + (vaddr_t)object;
 	} else {
-		/* Address corresponds with process-local mapping. */
-		fa->fa_vmspace = vs;
-		fa->fa_vmobject = NULL;
-		fa->fa_offset = (uintptr_t)object;
+		/* Shared mapping to anonymous memory. */
+		fa->fa_kind = FK_AMAP;
+		va = entry->aref.ar_amap;
+		fa->fa_value.amap = va;
+		fa->fa_offset = (entry->aref.ar_pageoff << PAGE_SHIFT) -
+		    entry->start + (vaddr_t)object;
+		amap_ref(va, fa->fa_offset >> PAGE_SHIFT, 1, AMAP_SHARED);
 	}
 
 	vm_map_unlock(map);
@@ -251,9 +271,15 @@ futex_address_free(struct futex_address *fa)
 {
 	struct uvm_object *vo;
 
-	vo = fa->fa_vmobject;
-	if (vo != NULL)
+	if (fa->fa_kind == FK_AMAP) {
+		/* Shared mapping to anonymous memory. */
+		amap_unref(fa->fa_value.amap, fa->fa_offset >> PAGE_SHIFT, 1,
+		    false);
+	} else if (fa->fa_kind == FK_OBJECT) {
+		/* Shared mapping to a file. */
+		vo = fa->fa_value.object;
 		vo->pgops->pgo_detach(vo);
+	}
 }
 
 static bool
@@ -261,8 +287,8 @@ futex_address_match(const struct futex_address *fa1,
     const struct futex_address *fa2)
 {
 
-	return (fa1->fa_vmspace == fa2->fa_vmspace &&
-	    fa1->fa_vmobject == fa2->fa_vmobject &&
+	return (fa1->fa_kind == fa2->fa_kind &&
+	    fa1->fa_value.opaque == fa2->fa_value.opaque &&
 	    fa1->fa_offset == fa2->fa_offset);
 }
 
@@ -535,7 +561,8 @@ futex_lock_unlock(struct futex_lock *fl, struct lwp *l,
 	error = futex_lock_update_owner(fl, lock);
 	if (error != 0)
 		return (error);
-	if (fl->fl_owner != LOCK_UNMANAGED && fl->fl_owner != l->l_lid)
+	if (fl->fl_owner != LOCK_UNMANAGED &&
+	    fl->fl_owner != cloudabi_gettid(l))
 		return (EPERM);
 	return (futex_lock_wake_up_next(fl, lock));
 }
@@ -603,7 +630,7 @@ futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 
 static int
 futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
-    lwpid_t tid, bool force_kernel_managed)
+    cloudabi_tid_t tid, bool force_kernel_managed)
 {
 	cloudabi_lock_t old, new, cmp;
 
@@ -662,7 +689,7 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
 static int
 futex_lock_wake_up_next(struct futex_lock *fl, cloudabi_lock_t *lock)
 {
-	lwpid_t tid;
+	cloudabi_tid_t tid;
 
 	/*
 	 * Determine which thread(s) to wake up. Prefer waking up
@@ -712,7 +739,7 @@ futex_lock_wrlock(struct futex_lock *fl, struct lwp *l,
 	struct futex_waiter fw;
 	int error;
 
-	error = futex_lock_trywrlock(fl, lock, l->l_lid,
+	error = futex_lock_trywrlock(fl, lock, cloudabi_gettid(l),
 	    futex_queue_count(donated) > 0);
 
 	if (error == 0 || error == EBUSY) {
@@ -745,7 +772,7 @@ futex_lock_wrlock(struct futex_lock *fl, struct lwp *l,
  * futex_queue operations.
  */
 
-static lwpid_t
+static cloudabi_tid_t
 futex_queue_tid_best(const struct futex_queue *fq)
 {
 
@@ -777,7 +804,7 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	int error;
 
 	/* Initialize futex_waiter object. */
-	fw->fw_tid = l->l_lid;
+	fw->fw_tid = cloudabi_gettid(l);
 	fw->fw_locked = false;
 	futex_queue_init(&fw->fw_donated);
 

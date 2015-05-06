@@ -54,6 +54,9 @@ int cloudabi_clock_time_get(struct lwp *, cloudabi_clockid_t,
 /* Converts a NetBSD errno to a CloudABI errno. */
 cloudabi_errno_t cloudabi_convert_errno(int);
 
+/* Generates a unique thread ID for a given thread. */
+cloudabi_tid_t cloudabi_gettid(struct lwp *);
+
 /* Performs a namei lookup with a base directory as a file descriptor. */
 int cloudabi_namei(struct lwp *, cloudabi_fd_t, struct nameidata *);
 

@@ -32,6 +32,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <machine/frame.h>
 #include <machine/userret.h>
 
+#include <compat/cloudabi/cloudabi_util.h>
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
 
@@ -43,7 +44,7 @@ cloudabi64_child_return(void *arg)
 
 	/* Initial register values for processes returning from fork. */
 	tf->tf_rax = CLOUDABI_PROCESS_CHILD;
-	tf->tf_rdx = l->l_lid;
+	tf->tf_rdx = cloudabi_gettid(l);
 	tf->tf_rflags &= ~PSL_C;	/* carry bit */
 
 	userret(l);

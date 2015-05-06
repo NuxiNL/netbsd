@@ -29,6 +29,7 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <sys/param.h>
 #include <sys/kmem.h>
 #include <sys/lwp.h>
+#include <sys/proc.h>
 
 #include <compat/cloudabi64/cloudabi64_syscalldefs.h>
 #include <compat/cloudabi64/cloudabi64_syscallargs.h>
@@ -58,6 +59,10 @@ cloudabi64_sys_thread_create(struct lwp *l,
 		kmem_free(threadattr, sizeof(*threadattr));
 		return (error);
 	}
-	retval[0] = lid;
+
+	/*
+	 * Generate unique thread ID using the same scheme as cloudabi_gettid().
+	 */
+	retval[0] = lid * PID_MAX + l->l_proc->p_pid;
 	return (0);
 }

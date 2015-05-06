@@ -153,7 +153,7 @@ cloudabi64_startlwp(void *arg)
 	 * thread.
 	 */
 	tf = l->l_md.md_regs;
-	tf->tf_rdi = l->l_lid;
+	tf->tf_rdi = cloudabi_gettid(l);
 	tf->tf_rsi = threadattr->argument;
 
 	kmem_free(threadattr, sizeof(*threadattr));
@@ -180,7 +180,7 @@ cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
 		.sd_elf_phdr	= eh->e_phoff + 0x400000,
 		.sd_elf_phdrlen	= eh->e_phnum,
 
-		.sd_thread_id	= l->l_lid,
+		.sd_thread_id	= cloudabi_gettid(l),
 		.sd_random_seed	= cprng_fast64(),
 
 		.sd_ncpus	= ncpu,

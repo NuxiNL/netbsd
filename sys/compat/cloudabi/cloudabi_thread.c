@@ -28,9 +28,19 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <sys/param.h>
 #include <sys/lwp.h>
+#include <sys/proc.h>
 #include <sys/syscallargs.h>
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
+#include <compat/cloudabi/cloudabi_util.h>
+
+cloudabi_tid_t
+cloudabi_gettid(struct lwp *l)
+{
+
+	/* Unique thread ID. */
+	return (l->l_lid * PID_MAX + l->l_proc->p_pid);
+}
 
 int
 cloudabi_sys_thread_exit(struct lwp *l,
