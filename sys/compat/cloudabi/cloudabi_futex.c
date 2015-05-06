@@ -259,7 +259,7 @@ futex_address_create(struct futex_address *fa, struct lwp *l,
 		fa->fa_value.amap = va;
 		fa->fa_offset = (entry->aref.ar_pageoff << PAGE_SHIFT) -
 		    entry->start + (vaddr_t)object;
-		amap_ref(va, fa->fa_offset >> PAGE_SHIFT, 1, AMAP_SHARED);
+		amap_ref(va, fa->fa_offset >> PAGE_SHIFT, 1, 0);
 	}
 
 	vm_map_unlock(map);
