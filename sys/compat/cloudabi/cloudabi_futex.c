@@ -772,6 +772,8 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
     struct futex_waiter *fw, struct lwp *l, cloudabi_clockid_t clock_id,
     cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
+	struct timeval tv;
+	cloudabi_timestamp_t now;
 	int error;
 
 	/* Initialize futex_waiter object. */
@@ -788,11 +790,27 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	++fl->fl_waitcount;
 
 	/* Wait respecting the timeout. */
-	/* TODO(ed): Use cv_timedwait_sig() here. */
 	futex_lock_assert(fl);
-	error = cv_wait_sig(&fw->fw_wait, &futex_global_lock);
+	do {
+		/* Fetch current time. */
+		error = cloudabi_clock_time_get(l, clock_id, &now);
+		if (error != 0)
+			break;
+		if (now >= timeout) {
+			error = EWOULDBLOCK;
+			break;
+		}
+
+		/* Convert to relative timeout and wait. */
+		tv.tv_sec = (timeout - now) / 1000000000;
+		tv.tv_usec = (timeout - now) % 1000000000 / 1000;
+		error = cv_timedwait_sig(&fw->fw_wait, &futex_global_lock,
+		    tvtohz(&tv));
+		if (error != 0)
+			break;
+	} while (fw->fw_queue == fq);
 	futex_lock_assert(fl);
-	if (error == EWOULDBLOCK &&
+	if ((error == 0 || error == EWOULDBLOCK) &&
 	    fw->fw_queue != NULL && fw->fw_queue != fq) {
 		/*
 		 * We got signalled on a condition variable, but
@@ -800,7 +818,9 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 		 * lock. In other words, we didn't actually time out. Go
 		 * back to sleep and wait for the lock to be reacquired.
 		 */
-		error = cv_wait_sig(&fw->fw_wait, &futex_global_lock);
+		do {
+			error = cv_wait_sig(&fw->fw_wait, &futex_global_lock);
+		} while (error == 0 && fw->fw_queue != NULL);
 		futex_lock_assert(fl);
 	}
 
@@ -814,11 +834,6 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	}
 
 	/* Thread is still enqueued. Remove it. */
-	/* TODO(ed): Remove this. */
-	if (error == 0) {
-		printf("Error was zero. Why?\n");
-		error = ETIMEDOUT;
-	}
 	KASSERT(error != 0);
 	STAILQ_REMOVE(&fq->fq_list, fw, futex_waiter, fw_next);
 	--fq->fq_count;
