@@ -295,6 +295,7 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 	vaddr_t defaddr;
 	struct file *fp = NULL;
 	struct uvm_object *uobj;
+	cap_rights_t rights;
 	int error;
 #ifdef PAX_ASLR
 	vaddr_t orig_addr;
@@ -386,7 +387,17 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 
 	advice = UVM_ADV_NORMAL;
 	if ((flags & MAP_ANON) == 0) {
-		if ((fp = fd_getfile(fd)) == NULL)
+		/* Convert rights that are needed. */
+		rights = CAP_MMAP;
+		if ((prot & PROT_READ) != 0)
+			rights |= CAP_MMAP_R;
+		if ((prot & PROT_WRITE) != 0)
+			rights |= CAP_MMAP_W;
+		if ((prot & PROT_EXEC) != 0)
+			rights |= CAP_MMAP_X;
+
+		error = fd_getfile(fd, rights, &fp);
+		if (error != 0)
 			return (EBADF);
 
 		if (fp->f_ops->fo_mmap == NULL) {

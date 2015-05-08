@@ -1962,6 +1962,7 @@ spawn_return(void *arg)
 	int error, newfd;
 	size_t i;
 	const struct posix_spawn_file_actions_entry *fae;
+	file_t *tfp;
 	pid_t ppid;
 	register_t retval;
 	bool have_reflock;
@@ -1997,7 +1998,7 @@ spawn_return(void *arg)
 			fae = &spawn_data->sed_actions->fae[i];
 			switch (fae->fae_action) {
 			case FAE_OPEN:
-				if (fd_getfile(fae->fae_fildes) != NULL) {
+				if (fd_getfile(fae->fae_fildes, 0, &tfp) == 0) {
 					error = fd_close(fae->fae_fildes);
 					if (error)
 						break;
@@ -2009,7 +2010,7 @@ spawn_return(void *arg)
 				if (newfd != fae->fae_fildes) {
 					error = dodup(l, newfd,
 					    fae->fae_fildes, 0, &retval);
-					if (fd_getfile(newfd) != NULL)
+					if (fd_getfile(newfd, 0, &tfp) == 0)
 						fd_close(newfd);
 				}
 				break;
@@ -2018,7 +2019,7 @@ spawn_return(void *arg)
 				    fae->fae_newfildes, 0, &retval);
 				break;
 			case FAE_CLOSE:
-				if (fd_getfile(fae->fae_fildes) == NULL) {
+				if (fd_getfile(fae->fae_fildes, 0, &tfp) != 0) {
 					error = EBADF;
 					break;
 				}

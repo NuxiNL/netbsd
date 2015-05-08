@@ -1565,7 +1565,7 @@ unp_internalize(struct mbuf **controlp)
 			error = EAGAIN;
 			goto out;
 		}
-		if ((fp = fd_getfile(fd)) == NULL
+		if (fd_getfile(fd, 0, &fp) != 0
 		    || fp->f_type == DTYPE_KQUEUE) {
 		    	if (fp)
 		    		fd_putfile(fd);

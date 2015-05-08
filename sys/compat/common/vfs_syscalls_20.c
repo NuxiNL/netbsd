@@ -177,7 +177,7 @@ compat_20_sys_fstatfs(struct lwp *l, const struct compat_20_sys_fstatfs_args *ua
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sbuf = malloc(sizeof(*sbuf), M_TEMP, M_WAITOK);

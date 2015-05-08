@@ -116,9 +116,11 @@ netbsd32_readv(struct lwp *l, const struct netbsd32_readv_args *uap, register_t 
 	} */
 	int fd = SCARG(uap, fd);
 	file_t *fp;
+	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_READ, &fp);
+	if (error != 0)
+		return (0);
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -221,8 +223,10 @@ netbsd32_writev(struct lwp *l, const struct netbsd32_writev_args *uap, register_
 	} */
 	int fd = SCARG(uap, fd);
 	file_t *fp;
+	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
+	error = fd_getfile(fd, CAP_WRITE, &fp);
+	if (error != 0)
 		return (EBADF);
 
 	if ((fp->f_flag & FWRITE) == 0) {
@@ -489,7 +493,7 @@ netbsd32___futimes50(struct lwp *l, const struct netbsd32___futimes50_args *uap,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_FUTIMES, &fp)) != 0)
 		return (error);
 
 	error = do_sys_utimes(l, fp->f_vnode, NULL, 0, tvp, UIO_SYSSPACE);
@@ -511,7 +515,7 @@ netbsd32___getdents30(struct lwp *l,
 	int error, done;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -642,7 +646,8 @@ netbsd32_preadv(struct lwp *l, const struct netbsd32_preadv_args *uap, register_
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
+	error = fd_getfile(fd, CAP_PREAD, &fp);
+	if (error != 0)
 		return (EBADF);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -688,8 +693,9 @@ netbsd32_pwritev(struct lwp *l, const struct netbsd32_pwritev_args *uap, registe
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_PWRITE, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -1343,7 +1349,7 @@ netbsd32_futimens(struct lwp *l, const struct netbsd32_futimens_args *uap,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_FUTIMES, &fp)) != 0)
 		return (error);
 	error = do_sys_utimensat(l, AT_FDCWD, fp->f_vnode, NULL, 0,
 	    tsp, UIO_SYSSPACE);

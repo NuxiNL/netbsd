@@ -368,7 +368,7 @@ compat_43_sys_getdirentries(struct lwp *l, const struct compat_43_sys_getdirentr
 	long loff;
 		 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

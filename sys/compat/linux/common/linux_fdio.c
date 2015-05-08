@@ -77,8 +77,9 @@ linux_ioctl_fdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 
 	com = (u_long)SCARG(uap, data);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	com = SCARG(uap, com);
 	ioctlf = fp->f_ops->fo_ioctl;

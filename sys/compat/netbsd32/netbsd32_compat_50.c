@@ -294,7 +294,7 @@ compat_50_netbsd32_futimes(struct lwp *l,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_FUTIMES, &fp)) != 0)
 		return error;
 
 	error = do_sys_utimes(l, fp->f_vnode, NULL, 0, tvp, UIO_SYSSPACE);

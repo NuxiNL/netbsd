@@ -85,8 +85,9 @@ linux32_ioctl_termios(struct lwp *l, const struct linux32_sys_ioctl_args *uap, r
 	char tioclinux;
 	int (*bsdioctl)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		fd_putfile(SCARG(uap, fd));

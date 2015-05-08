@@ -72,7 +72,7 @@ compat_30_netbsd32_getdents(struct lwp *l, const struct compat_30_netbsd32_getde
 	count = min(MAXBSIZE, SCARG(uap, count));
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;

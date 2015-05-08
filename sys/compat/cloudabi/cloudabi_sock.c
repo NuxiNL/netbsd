@@ -117,7 +117,7 @@ cloudabi_sys_sock_bind(struct lwp *l,
 	struct vnode *vp;
 	int error;
 
-	error = fd_getsock(SCARG(uap, s), &so);
+	error = fd_getsock(SCARG(uap, s), CAP_BIND, &so);
 	if (error != 0)
 		return (error);
 	solock(so);
@@ -148,7 +148,7 @@ cloudabi_sys_sock_bind(struct lwp *l,
 		goto out2;
 	}
 	CLOUDABI_NDINIT(&nd, CREATE, FOLLOW | LOCKPARENT, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd), CAP_BINDAT, &nd);
 	if (error != 0) {
 		solock(so);
 		goto out3;
@@ -211,7 +211,7 @@ cloudabi_sys_sock_connect(struct lwp *l,
 	struct vnode *vp;
 	int error;
 
-	error = fd_getsock(SCARG(uap, s), &so);
+	error = fd_getsock(SCARG(uap, s), CAP_CONNECT, &so);
 	if (error != 0)
 		return (error);
 	solock(so);
@@ -241,8 +241,8 @@ cloudabi_sys_sock_connect(struct lwp *l,
 
 	/* Look up the target path. */
 	error = cloudabi_namei_simple(l,
-	    SCARG(uap, fd) | CLOUDABI_LOOKUP_SYMLINK_FOLLOW, SCARG(uap, path),
-	    SCARG(uap, pathlen), LOCKLEAF, &vp);
+	    SCARG(uap, fd) | CLOUDABI_LOOKUP_SYMLINK_FOLLOW, CAP_CONNECTAT,
+	    SCARG(uap, path), SCARG(uap, pathlen), LOCKLEAF, &vp);
 	if (error != 0) {
 		solock(so);
 		goto out2;
@@ -334,7 +334,8 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
 	struct socket *so;
 	int error;
 
-	error = fd_getsock(SCARG(uap, fd), &so);
+	error = fd_getsock(SCARG(uap, fd),
+	    CAP_GETSOCKOPT | CAP_GETPEERNAME | CAP_GETSOCKNAME, &so);
 	if (error != 0)
 		return (error);
 	memset(&ss, '\0', sizeof(ss));

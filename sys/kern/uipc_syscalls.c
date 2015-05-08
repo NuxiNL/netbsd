@@ -136,7 +136,7 @@ do_sys_bind(struct lwp *l, int fd, struct sockaddr *nam)
 	struct socket	*so;
 	int		error;
 
-	if ((error = fd_getsock(fd, &so)) != 0)
+	if ((error = fd_getsock(fd, CAP_BIND, &so)) != 0)
 		return error;
 	error = sobind(so, nam, l);
 	fd_putfile(fd);
@@ -153,7 +153,7 @@ sys_listen(struct lwp *l, const struct sys_listen_args *uap, register_t *retval)
 	struct socket	*so;
 	int		error;
 
-	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
+	if ((error = fd_getsock(SCARG(uap, s), CAP_LISTEN, &so)) != 0)
 		return (error);
 	error = solisten(so, SCARG(uap, backlog), l);
 	fd_putfile(SCARG(uap, s));
@@ -170,8 +170,9 @@ do_sys_accept(struct lwp *l, int sock, struct mbuf **name,
 	struct socket	*so, *so2;
 	short		wakeup_state = 0;
 
-	if ((fp = fd_getfile(sock)) == NULL)
-		return EBADF;
+	error = fd_getfile(sock, CAP_ACCEPT, &fp);
+	if (error != 0)
+		return (error);
 	if (fp->f_type != DTYPE_SOCKET) {
 		fd_putfile(sock);
 		return ENOTSOCK;
@@ -273,6 +274,7 @@ sys_accept(struct lwp *l, const struct sys_accept_args *uap, register_t *retval)
 		syscallarg(struct sockaddr *)	name;
 		syscallarg(unsigned int *)	anamelen;
 	} */
+	file_t *fp;
 	int error, fd;
 	struct mbuf *name;
 
@@ -285,7 +287,7 @@ sys_accept(struct lwp *l, const struct sys_accept_args *uap, register_t *retval)
 		m_free(name);
 	if (error != 0) {
 		fd = (int)*retval;
-		if (fd_getfile(fd) != NULL)
+		if (fd_getfile(fd, 0, &fp) == 0)
 			(void)fd_close(fd);
 	}
 	return error;
@@ -302,6 +304,7 @@ sys_paccept(struct lwp *l, const struct sys_paccept_args *uap,
 		syscallarg(const sigset_t *)	mask;
 		syscallarg(int)			flags;
 	} */
+	file_t *fp;
 	int error, fd;
 	struct mbuf *name;
 	sigset_t *mask, amask;
@@ -324,7 +327,7 @@ sys_paccept(struct lwp *l, const struct sys_paccept_args *uap,
 		m_free(name);
 	if (error != 0) {
 		fd = (int)*retval;
-		if (fd_getfile(fd) != NULL)
+		if (fd_getfile(fd, 0, &fp) == 0)
 			(void)fd_close(fd);
 	}
 	return error;
@@ -356,7 +359,7 @@ do_sys_connect(struct lwp *l, int fd, struct mbuf *nam)
 	int		error;
 	int		interrupted = 0;
 
-	if ((error = fd_getsock(fd, &so)) != 0) {
+	if ((error = fd_getsock(fd, CAP_CONNECT, &so)) != 0) {
 		m_freem(nam);
 		return (error);
 	}
@@ -662,7 +665,7 @@ do_sys_sendmsg(struct lwp *l, int s, struct msghdr *mp, int flags,
 	struct socket	*so;
 	file_t		*fp;
 
-	if ((error = fd_getsock1(s, &so, &fp)) != 0)
+	if ((error = fd_getsock1(s, CAP_WRITE, &so, &fp)) != 0)
 		return error;
 	error = do_sys_sendmsg_so(l, s, so, fp, mp, flags, retsize);
 	fd_putfile(s);
@@ -763,7 +766,7 @@ sys_sendmmsg(struct lwp *l, const struct sys_sendmmsg_args *uap,
 	unsigned int vlen, flags, dg;
 
 	s = SCARG(uap, s);
-	if ((error = fd_getsock1(s, &so, &fp)) != 0)
+	if ((error = fd_getsock1(s, CAP_WRITE, &so, &fp)) != 0)
 		return error;
 
 	vlen = SCARG(uap, vlen);
@@ -819,6 +822,7 @@ free_rights(struct mbuf *m)
 	struct cmsghdr *cm;
 	int *fdv;
 	unsigned int nfds, i;
+	file_t *fp;
 
 	KASSERT(sizeof(*cm) <= m->m_len);
 	cm = mtod(m, struct cmsghdr *);
@@ -829,7 +833,7 @@ free_rights(struct mbuf *m)
 	fdv = (int *)CMSG_DATA(cm);
 
 	for (i = 0; i < nfds; i++)
-		if (fd_getfile(fdv[i]) != NULL)
+		if (fd_getfile(fdv[i], 0, &fp) == 0)
 			(void)fd_close(fdv[i]);
 }
 
@@ -1001,7 +1005,7 @@ do_sys_recvmsg(struct lwp *l, int s, struct msghdr *mp, struct mbuf **from,
 	int error;
 	struct socket *so;
 
-	if ((error = fd_getsock(s, &so)) != 0)
+	if ((error = fd_getsock(s, CAP_READ, &so)) != 0)
 		return error;
 	error = do_sys_recvmsg_so(l, s, so, mp, from, control, retsize);
 	fd_putfile(s);
@@ -1035,7 +1039,7 @@ sys_recvmmsg(struct lwp *l, const struct sys_recvmmsg_args *uap,
 	}
 
 	s = SCARG(uap, s);
-	if ((error = fd_getsock(s, &so)) != 0)
+	if ((error = fd_getsock(s, CAP_READ, &so)) != 0)
 		return error;
 
 	vlen = SCARG(uap, vlen);
@@ -1128,7 +1132,7 @@ sys_shutdown(struct lwp *l, const struct sys_shutdown_args *uap,
 	struct socket	*so;
 	int		error;
 
-	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
+	if ((error = fd_getsock(SCARG(uap, s), CAP_SHUTDOWN, &so)) != 0)
 		return error;
 	solock(so);
 	error = soshutdown(so, SCARG(uap, how));
@@ -1161,7 +1165,7 @@ sys_setsockopt(struct lwp *l, const struct sys_setsockopt_args *uap,
 	if (len > MCLBYTES)
 		return EINVAL;
 
-	if ((error = fd_getsock1(SCARG(uap, s), &so, &fp)) != 0)
+	if ((error = fd_getsock1(SCARG(uap, s), CAP_OTHER, &so, &fp)) != 0)
 		return (error);
 
 	sockopt_init(&sopt, SCARG(uap, level), SCARG(uap, name), len);
@@ -1208,7 +1212,7 @@ sys_getsockopt(struct lwp *l, const struct sys_getsockopt_args *uap,
 	} else
 		valsize = 0;
 
-	if ((error = fd_getsock1(SCARG(uap, s), &so, &fp)) != 0)
+	if ((error = fd_getsock1(SCARG(uap, s), CAP_GETSOCKOPT, &so, &fp)) != 0)
 		return (error);
 
 	sockopt_init(&sopt, SCARG(uap, level), SCARG(uap, name), 0);
@@ -1302,7 +1306,7 @@ do_sys_getpeername(int fd, struct mbuf **nam)
 	struct mbuf	*m;
 	int		error;
 
-	if ((error = fd_getsock(fd, &so)) != 0)
+	if ((error = fd_getsock(fd, CAP_GETPEERNAME, &so)) != 0)
 		return error;
 
 	m = m_getclr(M_WAIT, MT_SONAME);
@@ -1332,7 +1336,7 @@ do_sys_getsockname(int fd, struct mbuf **nam)
 	struct mbuf	*m;
 	int		error;
 
-	if ((error = fd_getsock(fd, &so)) != 0)
+	if ((error = fd_getsock(fd, CAP_GETSOCKNAME, &so)) != 0)
 		return error;
 
 	m = m_getclr(M_WAIT, MT_SONAME);

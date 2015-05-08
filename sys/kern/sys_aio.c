@@ -361,7 +361,8 @@ aio_process(struct aio_job *a_job)
 	struct aiocb *aiocbp = &a_job->aiocbp;
 	struct file *fp;
 	int fd = aiocbp->aio_fildes;
-	int error = 0;
+	cap_rights_t rights = 0;
+	int error;
 
 	KASSERT(a_job->aio_op != 0);
 
@@ -374,11 +375,13 @@ aio_process(struct aio_job *a_job)
 			goto done;
 		}
 
-		fp = fd_getfile(fd);
-		if (fp == NULL) {
-			error = EBADF;
+		if ((a_job->aio_op & AIO_READ) != 0)
+			rights |= CAP_PREAD;
+		if ((a_job->aio_op & AIO_WRITE) != 0)
+			rights |= CAP_PWRITE;
+		error = fd_getfile(fd, rights, &fp);
+		if (error != 0)
 			goto done;
-		}
 
 		aiov.iov_base = (void *)(uintptr_t)aiocbp->aio_buf;
 		aiov.iov_len = aiocbp->aio_nbytes;
@@ -429,8 +432,12 @@ aio_process(struct aio_job *a_job)
 		 */
 		struct vnode *vp;
 
-		if ((error = fd_getvnode(fd, &fp)) != 0)
-			goto done; 
+		if ((a_job->aio_op & AIO_SYNC) != 0)
+			rights |= CAP_FSYNC;
+		if ((a_job->aio_op & AIO_DSYNC) != 0)
+			rights |= CAP_FDATASYNC;
+		if ((error = fd_getvnode(fd, rights, &fp)) != 0)
+			goto done;
 
 		if ((fp->f_flag & FWRITE) == 0) {
 			fd_putfile(fd);

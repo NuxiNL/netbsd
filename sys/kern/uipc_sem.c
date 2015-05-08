@@ -252,10 +252,11 @@ ksem_get(int fd, ksem_t **ksret)
 {
 	ksem_t *ks;
 	file_t *fp;
+	int error;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL))
-		return EINVAL;
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (__predict_false(error != 0))
+		return (error);
 	if (__predict_false(fp->f_type != DTYPE_SEM)) {
 		fd_putfile(fd);
 		return EINVAL;
@@ -515,11 +516,13 @@ sys__ksem_close(struct lwp *l, const struct sys__ksem_close_args *uap,
 	/* {
 		intptr_t id;
 	} */
+	file_t *fp;
 	int fd = (int)SCARG(uap, id);
+	int error;
 
-	if (fd_getfile(fd) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(fd, 0, &fp);
+	if (error != 0)
+		return (error);
 	return fd_close(fd);
 }
 

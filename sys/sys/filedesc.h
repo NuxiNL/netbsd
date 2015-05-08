@@ -66,6 +66,56 @@
 #include <sys/rwlock.h>
 #include <sys/condvar.h>
 
+#define	_CAP_BIT(n)		((uint64_t)1 << (n))
+#define	CAP_ACCEPT		_CAP_BIT(0)
+#define	CAP_BIND		_CAP_BIT(1)
+#define	CAP_BINDAT		_CAP_BIT(2)
+#define	CAP_CONNECT		_CAP_BIT(3)
+#define	CAP_CONNECTAT		_CAP_BIT(4)
+#define	CAP_EVENT		_CAP_BIT(5)
+#define	CAP_FDATASYNC		_CAP_BIT(6)
+#define	CAP_FSTAT		_CAP_BIT(7)
+#define	CAP_FSTATAT		_CAP_BIT(8)
+#define	CAP_FSYNC		_CAP_BIT(9)
+#define	CAP_FTRUNCATE		_CAP_BIT(10)
+#define	CAP_FUTIMES		_CAP_BIT(11)
+#define	CAP_FUTIMESAT		_CAP_BIT(12)
+#define	CAP_GETDENTS		_CAP_BIT(13)
+#define	CAP_GETPEERNAME		_CAP_BIT(14)
+#define	CAP_GETSOCKNAME		_CAP_BIT(15)
+#define	CAP_GETSOCKOPT		_CAP_BIT(16)
+#define	CAP_JUST_MMAP_X		_CAP_BIT(17)
+#define	CAP_JUST_SEEK		_CAP_BIT(18)
+#define	CAP_KQUEUE_CHANGE	_CAP_BIT(19)
+#define	CAP_KQUEUE_EVENT	_CAP_BIT(20)
+#define	CAP_LINKAT_DEST		_CAP_BIT(21)
+#define	CAP_LINKAT_SRC		_CAP_BIT(22)
+#define	CAP_LISTEN		_CAP_BIT(23)
+#define	CAP_MKDIRAT		_CAP_BIT(24)
+#define	CAP_MKFIFOAT		_CAP_BIT(25)
+#define	CAP_MMAP		_CAP_BIT(26)
+#define	CAP_POSIX_FADVISE	_CAP_BIT(27)
+#define	CAP_POSIX_FALLOCATE	_CAP_BIT(28)
+#define	CAP_READ		_CAP_BIT(29)
+#define	CAP_READLINKAT		_CAP_BIT(30)
+#define	CAP_RENAMEAT_DEST	_CAP_BIT(31)
+#define	CAP_RENAMEAT_SRC	_CAP_BIT(32)
+#define	CAP_SEEK_TELL		_CAP_BIT(33)
+#define	CAP_SHUTDOWN		_CAP_BIT(34)
+#define	CAP_SYMLINKAT		_CAP_BIT(35)
+#define	CAP_UNLINKAT		_CAP_BIT(36)
+#define	CAP_WRITE		_CAP_BIT(37)
+#define	CAP_OTHER		_CAP_BIT(63)
+
+#define	CAP_MMAP_R		(CAP_MMAP | CAP_JUST_SEEK | CAP_READ)
+#define	CAP_MMAP_W		(CAP_MMAP | CAP_JUST_SEEK | CAP_WRITE)
+#define	CAP_MMAP_X		(CAP_MMAP | CAP_JUST_SEEK | CAP_JUST_MMAP_X)
+#define	CAP_PREAD		(CAP_READ | CAP_JUST_SEEK)
+#define	CAP_PWRITE		(CAP_WRITE | CAP_JUST_SEEK)
+#define	CAP_SEEK		(CAP_JUST_SEEK | CAP_SEEK_TELL)
+
+typedef uint64_t cap_rights_t;
+
 /*
  * This structure is used for the management of descriptors.  It may be
  * shared by multiple processes.
@@ -196,12 +246,12 @@ void	fd_free(void);
 void	fd_closeexec(void);
 void	fd_ktrexecfd(void);
 int	fd_checkstd(void);
-file_t	*fd_getfile(unsigned);
+int	fd_getfile(unsigned, cap_rights_t, file_t **);
 file_t	*fd_getfile2(proc_t *, unsigned);
 void	fd_putfile(unsigned);
-int	fd_getvnode(unsigned, file_t **);
-int	fd_getsock(unsigned, struct socket **);
-int	fd_getsock1(unsigned, struct socket **, file_t **);
+int	fd_getvnode(unsigned, cap_rights_t, file_t **);
+int	fd_getsock(unsigned, cap_rights_t, struct socket **);
+int	fd_getsock1(unsigned, cap_rights_t, struct socket **, file_t **);
 void	fd_putvnode(unsigned);
 void	fd_putsock(unsigned);
 int	fd_close(unsigned);

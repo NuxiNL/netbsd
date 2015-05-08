@@ -834,12 +834,18 @@ kevent1(register_t *retval, int fd,
 	int nerrors, error;
 	struct kevent kevbuf[KQ_NEVENTS];	/* approx 300 bytes on 64-bit */
 	file_t *fp;
+	cap_rights_t rights;
+
+	rights = 0;
+	if (nchanges > 0)
+		rights |= CAP_KQUEUE_CHANGE;
+	if (nevents > 0)
+		rights |= CAP_KQUEUE_EVENT;
+	error = fd_getfile(fd, rights, &fp);
+	if (error != 0)
+		return (error);
 
 	/* check that we're dealing with a kq */
-	fp = fd_getfile(fd);
-	if (fp == NULL)
-		return (EBADF);
-
 	if (fp->f_type != DTYPE_KQUEUE) {
 		fd_putfile(fd);
 		return (EBADF);
@@ -956,10 +962,11 @@ kqueue_register(struct kqueue *kq, struct kevent *kev)
 	if (kfilter->filtops->f_isfd) {
 		/* monitoring a file descriptor */
 		fd = kev->ident;
-		if ((fp = fd_getfile(fd)) == NULL) {
+		error = fd_getfile(fd, CAP_EVENT, &fp);
+		if (error != 0) {
 			rw_exit(&kqueue_filter_lock);
 			kmem_free(newkn, sizeof(*newkn));
-			return EBADF;
+			return (error);
 		}
 		mutex_enter(&fdp->fd_lock);
 		ff = fdp->fd_dt->dt_ff[fd];

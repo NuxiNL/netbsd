@@ -105,12 +105,13 @@ sys_read(struct lwp *l, const struct sys_read_args *uap, register_t *retval)
 		syscallarg(size_t)	nbyte;
 	} */
 	file_t *fp;
-	int fd;
+	int error, fd;
 
 	fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_READ, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -197,8 +198,9 @@ do_filereadv(int fd, const struct iovec *iovp, int iovcnt,
 	if (iovcnt == 0)
 		return EINVAL;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	error = fd_getfile(fd, CAP_READ, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -307,12 +309,13 @@ sys_write(struct lwp *l, const struct sys_write_args *uap, register_t *retval)
 		syscallarg(size_t)		nbyte;
 	} */
 	file_t *fp;
-	int fd;
+	int error, fd;
 
 	fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_WRITE, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -402,8 +405,9 @@ do_filewritev(int fd, const struct iovec *iovp, int iovcnt,
 	if (iovcnt == 0)
 		return EINVAL;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	error = fd_getfile(fd, CAP_WRITE, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -538,8 +542,9 @@ sys_ioctl(struct lwp *l, const struct sys_ioctl_args *uap, register_t *retval)
 	error = 0;
 	p = l->l_proc;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;

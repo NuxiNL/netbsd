@@ -270,7 +270,7 @@ linux_sys_getdents64(struct lwp *l, const struct linux_sys_getdents64_args *uap,
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

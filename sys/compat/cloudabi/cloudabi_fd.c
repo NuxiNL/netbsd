@@ -286,11 +286,11 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 		.fs_rights_inheriting	= ~0,
 	};
 	file_t *fp;
-	int oflags;
+	int error, oflags;
 
-	fp = fd_getfile(SCARG(uap, fd));
-	if (fp == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), 0, &fp);
+	if (error != 0)
+		return (error);
 	oflags = OFLAGS(fp->f_flag);
 	fd_putfile(SCARG(uap, fd));
 	fsb.fs_filetype = cloudabi_convert_filetype(fp);

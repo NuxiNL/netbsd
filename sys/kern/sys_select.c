@@ -378,7 +378,7 @@ static inline int
 selscan(char *bits, const int nfd, const size_t ni, register_t *retval)
 {
 	fd_mask *ibitp, *obitp;
-	int msk, i, j, fd, n;
+	int error, msk, i, j, fd, n;
 	file_t *fp;
 
 	ibitp = (fd_mask *)(bits + ni * 0);
@@ -394,8 +394,9 @@ selscan(char *bits, const int nfd, const size_t ni, register_t *retval)
 			obits = 0;
 			while ((j = ffs(ibits)) && (fd = i + --j) < nfd) {
 				ibits &= ~(1 << j);
-				if ((fp = fd_getfile(fd)) == NULL)
-					return (EBADF);
+				error = fd_getfile(fd, CAP_EVENT, &fp);
+				if (error != 0)
+					return (error);
 				/*
 				 * Setup an argument to selrecord(), which is
 				 * a file descriptor number.
@@ -533,7 +534,7 @@ pollscan(struct pollfd *fds, const int nfd, register_t *retval)
 		fds->revents = 0;
 		if (fds->fd < 0) {
 			revents = 0;
-		} else if ((fp = fd_getfile(fds->fd)) == NULL) {
+		} else if (fd_getfile(fds->fd, CAP_EVENT, &fp) != 0) {
 			revents = POLLNVAL;
 		} else {
 			/*

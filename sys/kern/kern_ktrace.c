@@ -1159,8 +1159,9 @@ sys_fktrace(struct lwp *l, const struct sys_fktrace_args *uap, register_t *retva
 	int error, fd;
 
 	fd = SCARG(uap, fd);
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	if ((fp->f_flag & FWRITE) == 0)
 		error = EBADF;
 	else

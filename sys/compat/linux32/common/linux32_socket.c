@@ -486,8 +486,9 @@ linux32_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	 * So, we must duplicate code from sys_ioctl() and ifconf().  Ugh.
 	 */
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	KERNEL_LOCK(1, NULL);
 
@@ -589,15 +590,16 @@ linux32_ioctl_socket(struct lwp *l, const struct linux32_sys_ioctl_args *uap, re
 		syscallarg(void *) data;
 	} */
 	u_long com;
-	int error = 0, isdev = 0, dosys = 1;
+	int error, isdev = 0, dosys = 1;
 	struct netbsd32_ioctl_args ia;
 	file_t *fp;
 	struct vnode *vp;
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct ioctl_pt pt;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if (fp->f_type == DTYPE_VNODE) {
 		vp = (struct vnode *)fp->f_data;

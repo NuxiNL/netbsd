@@ -290,11 +290,11 @@ mqueue_get(mqd_t mqd, int fflag, mqueue_t **mqret)
 	const int fd = (int)mqd;
 	mqueue_t *mq;
 	file_t *fp;
+	int error;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL)) {
-		return EBADF;
-	}
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (__predict_false(error != 0))
+		return (error);
 	if (__predict_false(fp->f_type != DTYPE_MQUEUE)) {
 		fd_putfile(fd);
 		return EBADF;

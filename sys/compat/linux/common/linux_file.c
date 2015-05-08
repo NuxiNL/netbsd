@@ -175,10 +175,8 @@ linux_open_ctty(struct lwp *l, int flags, int fd)
         if (!(flags & O_NOCTTY) && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
                 file_t *fp;
 
-		fp = fd_getfile(fd);
-
                 /* ignore any error, just give it a try */
-                if (fp != NULL) {
+		if (fd_getfile(fd, CAP_OTHER, &fp) == 0) {
 			if (fp->f_type == DTYPE_VNODE) {
 				(fp->f_ops->fo_ioctl) (fp, TIOCSCTTY, NULL);
 			}
@@ -317,8 +315,9 @@ linux_sys_fcntl(struct lwp *l, const struct linux_sys_fcntl_args *uap, register_
 		 * so that F_GETFL would report the ASYNC i/o is on.
 		 */
 		if (val & O_ASYNC) {
-			if (((fp1 = fd_getfile(fd)) == NULL))
-			    return (EBADF);
+			error = fd_getfile(fd, 0, &fp1);
+			if (error != 0)
+			    return (error);
 			if (((fp1->f_type == DTYPE_SOCKET) && fp1->f_data
 			      && ((struct socket *)fp1->f_data)->so_state & SS_ISAPIPE)
 			    || (fp1->f_type == DTYPE_PIPE))
@@ -364,8 +363,9 @@ linux_sys_fcntl(struct lwp *l, const struct linux_sys_fcntl_args *uap, register_
 		 * restrictive for Linux F_{G,S}ETOWN. For non-tty descriptors,
 		 * this is not a problem.
 		 */
-		if ((fp = fd_getfile(fd)) == NULL)
-			return EBADF;
+		error = fd_getfile(fd, 0, &fp);
+		if (error != 0)
+			return (error);
 
 		/* Check it's a character device vnode */
 		if (fp->f_type != DTYPE_VNODE

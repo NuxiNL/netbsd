@@ -684,7 +684,7 @@ linux_sys_getdents(struct lwp *l, const struct linux_sys_getdents_args *uap, reg
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -1391,7 +1391,7 @@ linux_do_sys_utimensat(struct lwp *l, int fd, const char *path, struct timespec 
 		file_t *fp;
 
 		/* fd_getvnode() will use the descriptor for us */
-		if ((error = fd_getvnode(fd, &fp)) != 0)
+		if ((error = fd_getvnode(fd, CAP_FUTIMESAT, &fp)) != 0)
 			return error;
 		error = do_sys_utimensat(l, AT_FDCWD, fp->f_data, NULL, 0,
 		    tsp, UIO_SYSSPACE);

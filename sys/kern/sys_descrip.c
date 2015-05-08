@@ -110,9 +110,9 @@ sys_dup(struct lwp *l, const struct sys_dup_args *uap, register_t *retval)
 
 	oldfd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(oldfd)) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(oldfd, 0, &fp);
+	if (error != 0)
+		return (error);
 	error = fd_dup(fp, 0, &newfd, false);
 	fd_putfile(oldfd);
 	*retval = newfd;
@@ -128,8 +128,9 @@ dodup(struct lwp *l, int from, int to, int flags, register_t *retval)
 	int error;
 	file_t *fp;
 
-	if ((fp = fd_getfile(from)) == NULL)
-		return EBADF;
+	error = fd_getfile(from, 0, &fp);
+	if (error != 0)
+		return (error);
 	mutex_enter(&fp->f_lock);
 	fp->f_count++;
 	mutex_exit(&fp->f_lock);
@@ -239,8 +240,9 @@ do_fcntl_lock(int fd, int cmd, struct flock *fl)
 	proc_t *p;
 	int error, flg;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	if (fp->f_type != DTYPE_VNODE) {
 		fd_putfile(fd);
 		return EINVAL;
@@ -330,6 +332,7 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 	file_t *fp;
 	struct flock fl;
 	bool cloexec = false;
+	cap_rights_t rights;
 
 	fd = SCARG(uap, fd);
 	cmd = SCARG(uap, cmd);
@@ -341,7 +344,7 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 		if (fd < 0)
 			return EBADF;
 		while ((i = fdp->fd_lastfile) >= fd) {
-			if (fd_getfile(i) == NULL) {
+			if (fd_getfile(i, 0, &fp) != 0) {
 				/* Another thread has updated. */
 				continue;
 			}
@@ -369,8 +372,21 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 		break;
 	}
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	/* Always allow commands that only apply to the descriptor itself. */
+	switch (cmd) {
+	case F_DUPFD_CLOEXEC:
+	case F_DUPFD:
+	case F_GETFD:
+	case F_SETFD:
+		rights = 0;
+		break;
+	default:
+		rights = CAP_OTHER;
+		break;
+	}
+	error = fd_getfile(fd, rights, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((cmd & F_FSCTL)) {
 		error = fcntl_forfs(fd, fp, cmd, SCARG(uap, arg));
@@ -479,11 +495,12 @@ sys_close(struct lwp *l, const struct sys_close_args *uap, register_t *retval)
 	/* {
 		syscallarg(int)	fd;
 	} */
+	file_t *fp;
 	int error;
 
-	if (fd_getfile(SCARG(uap, fd)) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(SCARG(uap, fd), 0, &fp);
+	if (error != 0)
+		return (error);
 
 	error = fd_close(SCARG(uap, fd));
 	if (error == ERESTART) {
@@ -507,9 +524,9 @@ do_sys_fstat(int fd, struct stat *sb)
 	file_t *fp;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(fd, CAP_FSTAT, &fp);
+	if (error != 0)
+		return (error);
 	error = (*fp->f_ops->fo_stat)(fp, sb);
 	fd_putfile(fd);
 
@@ -552,11 +569,10 @@ sys_fpathconf(struct lwp *l, const struct sys_fpathconf_args *uap,
 	file_t *fp;
 
 	fd = SCARG(uap, fd);
-	error = 0;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return (EBADF);
-	}
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	switch (fp->f_type) {
 	case DTYPE_SOCKET:
 	case DTYPE_PIPE:
@@ -604,11 +620,10 @@ sys_flock(struct lwp *l, const struct sys_flock_args *uap, register_t *retval)
 
 	fd = SCARG(uap, fd);
 	how = SCARG(uap, how);
-	error = 0;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	if (fp->f_type != DTYPE_VNODE) {
 		fd_putfile(fd);
 		return EOPNOTSUPP;
@@ -666,9 +681,9 @@ do_posix_fadvise(int fd, off_t offset, off_t len, int advice)
 	} else {
 		return EINVAL;
 	}
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	error = fd_getfile(fd, CAP_POSIX_FADVISE, &fp);
+	if (error != 0)
+		return (error);
 	if (fp->f_type != DTYPE_VNODE) {
 		if (fp->f_type == DTYPE_PIPE || fp->f_type == DTYPE_SOCKET) {
 			error = ESPIPE;

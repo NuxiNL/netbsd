@@ -159,8 +159,9 @@ linux_sys_ioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, register_
 		struct vattr va;
 		extern const struct cdevsw sequencer_cdevsw;
 
-		if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-			return EBADF;
+		error = fd_getfile(SCARG(uap, fd), 0, &fp);
+		if (error != 0)
+			return (error);
 		if (fp->f_type == DTYPE_VNODE &&
 		    (vp = (struct vnode *)fp->f_data) != NULL &&
 		    vp->v_type == VCHR) {

@@ -330,6 +330,7 @@ static int
 /*ARGSUSED*/
 ptmopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	file_t *fp;
 	int error;
 	int fd;
 	dev_t ttydev;
@@ -349,10 +350,8 @@ ptmopen(dev_t dev, int flag, int mode, struct lwp *l)
 			 * a new linux module.
 			 */
 			if ((error = pty_grant_slave(l, ttydev, mp)) != 0) {
-				file_t *fp = fd_getfile(fd);
-				if (fp != NULL) {
+				if (fd_getfile(fd, 0, &fp) == 0)
 					fd_close(fd);
-				}
 				return error;
 			}
 		}
@@ -412,15 +411,11 @@ ptmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		return EINVAL;
 	}
 bad2:
-	fp = fd_getfile(sfd);
-	if (fp != NULL) {
+	if (fd_getfile(sfd, 0, &fp) == 0)
 		fd_close(sfd);
-	}
  bad:
-	fp = fd_getfile(cfd);
-	if (fp != NULL) {
+	if (fd_getfile(cfd, 0, &fp) == 0)
 		fd_close(cfd);
-	}
 	return error;
 }
 

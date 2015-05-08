@@ -425,7 +425,7 @@ sys_extattr_set_fd(struct lwp *l, const struct sys_extattr_set_fd_args *uap, reg
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -519,7 +519,7 @@ sys_extattr_get_fd(struct lwp *l, const struct sys_extattr_get_fd_args *uap, reg
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -611,7 +611,7 @@ sys_extattr_delete_fd(struct lwp *l, const struct sys_extattr_delete_fd_args *ua
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -691,7 +691,7 @@ sys_extattr_list_fd(struct lwp *l, const struct sys_extattr_list_fd_args *uap, r
 	struct vnode *vp;
 	int error;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -875,7 +875,7 @@ sys_fsetxattr(struct lwp *l, const struct sys_fsetxattr_args *uap, register_t *r
 	if (error)
 		goto out;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		goto out;
 	vp = fp->f_vnode;
@@ -978,7 +978,7 @@ sys_fgetxattr(struct lwp *l, const struct sys_fgetxattr_args *uap, register_t *r
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -1111,7 +1111,7 @@ sys_flistxattr(struct lwp *l, const struct sys_flistxattr_args *uap, register_t 
 	register_t listsize_usr, listsize_sys;
 	int error;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -1228,7 +1228,7 @@ sys_fremovexattr(struct lwp *l, const struct sys_fremovexattr_args *uap, registe
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;

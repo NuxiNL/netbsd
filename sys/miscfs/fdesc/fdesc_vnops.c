@@ -341,8 +341,9 @@ fdesc_attr(int fd, struct vattr *vap, kauth_cred_t cred)
 	struct stat stb;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_FSTAT, &fp);
+	if (error != 0)
+		return (error);
 
 	switch (fp->f_type) {
 	case DTYPE_VNODE:
@@ -489,6 +490,7 @@ fdesc_setattr(void *v)
 	} */ *ap = v;
 	file_t *fp;
 	unsigned fd;
+	int error;
 
 	/*
 	 * Can't mess with the root vnode
@@ -505,8 +507,9 @@ fdesc_setattr(void *v)
 	}
 
 	fd = VTOFDESC(ap->a_vp)->fd_fd;
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	/*
 	 * XXX: Can't reasonably set the attr's on any types currently.
@@ -820,7 +823,7 @@ fdesc_kqfilter(void *v)
 	case Fdesc:
 		/* just invoke kqfilter for the underlying descriptor */
 		fd = VTOFDESC(ap->a_vp)->fd_fd;
-		if ((fp = fd_getfile(fd)) == NULL)
+		if (fd_getfile(fd, CAP_OTHER, &fp) != 0)
 			return (1);
 		error = (*fp->f_ops->fo_kqfilter)(fp, ap->a_kn);
 		fd_putfile(fd);

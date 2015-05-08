@@ -350,7 +350,7 @@ linux_sys_socket(struct lwp *l, const struct linux_sys_socket_args *uap, registe
 	if (!error && ip6_v6only && SCARG(&bsa, domain) == PF_INET6) {
 		struct socket *so;
 
-		if (fd_getsock(*retval, &so) == 0) {
+		if (fd_getsock(*retval, 0, &so) == 0) {
 			int val = 0;
 
 			/* ignore error */
@@ -1002,7 +1002,7 @@ linux_sys_setsockopt(struct lwp *l, const struct linux_sys_setsockopt_args *uap,
 		int error, family;
 
 		/* fd_getsock() will use the descriptor for us */
-	    	if ((error = fd_getsock(SCARG(&bsa, s), &so)) != 0)
+		if ((error = fd_getsock(SCARG(&bsa, s), CAP_OTHER, &so)) != 0)
 		    	return error;
 		family = so->so_proto->pr_domain->dom_family;
 		fd_putfile(SCARG(&bsa, s));
@@ -1190,8 +1190,9 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	 * So, we must duplicate code from sys_ioctl() and ifconf().  Ugh.
 	 */
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	KERNEL_LOCK(1, NULL);
 
@@ -1301,8 +1302,9 @@ linux_ioctl_socket(struct lwp *l, const struct linux_sys_ioctl_args *uap, regist
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct ioctl_pt pt;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if (fp->f_type == DTYPE_VNODE) {
 		vp = (struct vnode *)fp->f_data;
@@ -1416,7 +1418,7 @@ linux_sys_connect(struct lwp *l, const struct linux_sys_connect_args *uap, regis
 		int state, prflags;
 
 		/* fd_getsock() will use the descriptor for us */
-	    	if (fd_getsock(SCARG(uap, s), &so) != 0)
+		if (fd_getsock(SCARG(uap, s), 0, &so) != 0)
 		    	return EISCONN;
 
 		solock(so);
@@ -1521,7 +1523,7 @@ linux_get_sa_sb(struct lwp *l, int s, struct sockaddr_big *sb,
 		struct socket *so;
 
 		/* fd_getsock() will use the descriptor for us */
-		if ((error = fd_getsock(s, &so)) != 0)
+		if ((error = fd_getsock(s, 0, &so)) != 0)
 			return error;
 
 		bdom = so->so_proto->pr_domain->dom_family;
@@ -1620,7 +1622,7 @@ linux_get_sa(struct lwp *l, int s, struct mbuf **mp,
 		struct socket *so;
 
 		/* fd_getsock() will use the descriptor for us */
-		if ((error = fd_getsock(s, &so)) != 0)
+		if ((error = fd_getsock(s, 0, &so)) != 0)
 			goto bad;
 
 		bdom = so->so_proto->pr_domain->dom_family;

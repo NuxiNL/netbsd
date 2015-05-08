@@ -28,6 +28,7 @@
 #ifndef _CLOUDABI_UTIL_H_
 #define	_CLOUDABI_UTIL_H_
 
+#include <sys/filedesc.h>
 #include <sys/socket.h>
 
 #include <compat/cloudabi/cloudabi_syscalldefs.h>
@@ -43,9 +44,13 @@ struct vnode;
 #define	CLOUDABI_NDINIT(ndp, op, flags, pathbuf) \
 	NDINIT(ndp, op, (flags) | SANDBOXINDIR, pathbuf)
 
+/* Performs a namei lookup with a base directory as a file descriptor. */
+int cloudabi_namei(struct lwp *, cloudabi_fd_t, cap_rights_t,
+    struct nameidata *);
+
 /* Returns the vnode corresponding with a base directory and pathname. */
-int cloudabi_namei_simple(struct lwp *, cloudabi_lookup_t, const char *,
-    size_t, unsigned int, struct vnode **);
+int cloudabi_namei_simple(struct lwp *, cloudabi_lookup_t, cap_rights_t,
+    const char *, size_t, unsigned int, struct vnode **);
 
 /* Fetches the time value of a clock. */
 int cloudabi_clock_time_get(struct lwp *, cloudabi_clockid_t,
@@ -59,9 +64,6 @@ cloudabi_filetype_t cloudabi_convert_filetype(const struct file *);
 
 /* Generates a unique thread ID for a given thread. */
 cloudabi_tid_t cloudabi_gettid(struct lwp *);
-
-/* Performs a namei lookup with a base directory as a file descriptor. */
-int cloudabi_namei(struct lwp *, cloudabi_fd_t, struct nameidata *);
 
 /* Converts NetBSD's struct sockaddr to CloudABI's cloudabi_sockaddr_t. */
 void cloudabi_convert_sockaddr(const struct sockaddr *, socklen_t,

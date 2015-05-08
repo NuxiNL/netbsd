@@ -357,8 +357,8 @@ fd_unused(filedesc_t *fdp, unsigned fd)
  * Look up the file structure corresponding to a file descriptor
  * and return the file, holding a reference on the descriptor.
  */
-file_t *
-fd_getfile(unsigned fd)
+int
+fd_getfile(unsigned fd, cap_rights_t rights, file_t **retval)
 {
 	filedesc_t *fdp;
 	fdfile_t *ff;
@@ -372,13 +372,15 @@ fd_getfile(unsigned fd)
 	fdp = curlwp->l_fd;
 	dt = fdp->fd_dt;
 	if (__predict_false(fd >= dt->dt_nfiles)) {
-		return NULL;
+		return (EBADF);
 	}
 	ff = dt->dt_ff[fd];
 	KASSERT(fd >= NDFDFILE || ff == (fdfile_t *)fdp->fd_dfdfile[fd]);
 	if (__predict_false(ff == NULL)) {
-		return NULL;
+		return (EBADF);
 	}
+
+	/* TODO(ed): Validate rights. */
 
 	/* Now get a reference to the descriptor. */
 	if (fdp->fd_refcnt == 1) {
@@ -406,10 +408,11 @@ fd_getfile(unsigned fd)
 	 */
 	fp = ff->ff_file;
 	if (__predict_true(fp != NULL)) {
-		return fp;
+		*retval = fp;
+		return (0);
 	}
 	fd_putfile(fd);
-	return NULL;
+	return (EBADF);
 }
 
 /*
@@ -479,14 +482,15 @@ fd_putfile(unsigned fd)
  * to a vnode.
  */
 int
-fd_getvnode(unsigned fd, file_t **fpp)
+fd_getvnode(unsigned fd, cap_rights_t rights, file_t **fpp)
 {
 	vnode_t *vp;
 	file_t *fp;
+	int error;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL)) {
-		return EBADF;
+	error = fd_getfile(fd, rights, &fp);
+	if (__predict_false(error != 0)) {
+		return (error);
 	}
 	if (__predict_false(fp->f_type != DTYPE_VNODE)) {
 		fd_putfile(fd);
@@ -507,25 +511,29 @@ fd_getvnode(unsigned fd, file_t **fpp)
  * to a socket.
  */
 int
-fd_getsock1(unsigned fd, struct socket **sop, file_t **fp)
+fd_getsock1(unsigned fd, cap_rights_t rights, struct socket **sop, file_t **fpp)
 {
-	*fp = fd_getfile(fd);
-	if (__predict_false(*fp == NULL)) {
-		return EBADF;
+	file_t *fp;
+	int error;
+
+	error = fd_getfile(fd, rights, &fp);
+	if (__predict_false(error != 0)) {
+		return (error);
 	}
-	if (__predict_false((*fp)->f_type != DTYPE_SOCKET)) {
+	if (__predict_false(fp->f_type != DTYPE_SOCKET)) {
 		fd_putfile(fd);
 		return ENOTSOCK;
 	}
-	*sop = (*fp)->f_socket;
+	*sop = fp->f_socket;
+	*fpp = fp;
 	return 0;
 }
 
 int
-fd_getsock(unsigned fd, struct socket **sop)
+fd_getsock(unsigned fd, cap_rights_t rights, struct socket **sop)
 {
 	file_t *fp;
-	return fd_getsock1(fd, sop, &fp);
+	return fd_getsock1(fd, rights, sop, &fp);
 }
 
 /*
@@ -746,6 +754,7 @@ fd_dup2(file_t *fp, unsigned newfd, int flags)
 	filedesc_t *fdp = curlwp->l_fd;
 	fdfile_t *ff;
 	fdtab_t *dt;
+	file_t *tfp;
 
 	if (flags & ~(O_CLOEXEC|O_NONBLOCK))
 		return EINVAL;
@@ -766,7 +775,7 @@ fd_dup2(file_t *fp, unsigned newfd, int flags)
 	mutex_enter(&fdp->fd_lock);
 	while (fd_isused(fdp, newfd)) {
 		mutex_exit(&fdp->fd_lock);
-		if (fd_getfile(newfd) != NULL) {
+		if (fd_getfile(newfd, 0, &tfp) == 0) {
 			(void)fd_close(newfd);
 		} else {
 			/*
@@ -1651,9 +1660,8 @@ fd_dupopen(int old, int *newp, int mode, int error)
 	file_t *fp;
 	fdtab_t *dt;
 
-	if ((fp = fd_getfile(old)) == NULL) {
+	if (fd_getfile(old, 0, &fp) != 0)
 		return EBADF;
-	}
 	fdp = curlwp->l_fd;
 	dt = fdp->fd_dt;
 	ff = dt->dt_ff[old];

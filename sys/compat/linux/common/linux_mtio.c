@@ -76,14 +76,15 @@ linux_ioctl_mtio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 {
 	file_t *fp;
 	u_long com = SCARG(uap, com);
-	int i, error = 0;
+	int i, error;
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct linux_mtop lmtop;
 	struct linux_mtget lmtget;
 	struct mtop mt;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return EBADF;
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	ioctlf = fp->f_ops->fo_ioctl;
 

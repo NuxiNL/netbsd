@@ -77,8 +77,9 @@ linux_ioctl_hdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 	struct linux_hd_geometry hdg;
 	struct linux_hd_big_geometry hdg_big;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	com = SCARG(uap, com);
 	ioctlf = fp->f_ops->fo_ioctl;

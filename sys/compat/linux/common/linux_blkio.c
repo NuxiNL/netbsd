@@ -71,8 +71,9 @@ linux_ioctl_blkio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 	struct partinfo partp;
 	struct disklabel label;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	error = 0;
 	ioctlf = fp->f_ops->fo_ioctl;

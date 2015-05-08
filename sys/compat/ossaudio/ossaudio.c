@@ -178,11 +178,12 @@ oss_ioctl_audio(struct lwp *l, const struct oss_sys_ioctl_args *uap, register_t 
 	struct audio_encoding tmpenc;
 	u_int u;
 	int idat, idata;
-	int error = 0;
+	int error;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;
@@ -1046,7 +1047,7 @@ oss_ioctl_mixer(struct lwp *lwp, const struct oss_sys_ioctl_args *uap, register_
 	int l, r, n, e;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &fp)) != 0)
 		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
@@ -1291,8 +1292,9 @@ oss_ioctl_sequencer(struct lwp *l, const struct oss_sys_ioctl_args *uap, registe
 	int error;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;

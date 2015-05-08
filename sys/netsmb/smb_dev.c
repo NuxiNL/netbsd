@@ -414,8 +414,9 @@ smb_dev2share(int fd, int mode, struct smb_cred *scred,
 	dev_t dev;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 
 	vp = fp->f_vnode;
 	if (fp->f_type != DTYPE_VNODE

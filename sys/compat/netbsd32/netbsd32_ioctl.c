@@ -729,7 +729,7 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 	struct file *fp;
 	struct filedesc *fdp;
 	u_long com;
-	int error = 0;
+	int error;
 	size_t size;
 	size_t alloc_size32, size32;
 	void *data, *memp = NULL;
@@ -769,8 +769,9 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 
 	fdp = p->p_fd;
 	fd = SCARG(uap, fd);
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;
 		goto out;

@@ -115,12 +115,13 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 /* Performs a namei lookup with a base directory as a file descriptor. */
 int
-cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
+cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, cap_rights_t rights,
+    struct nameidata *ndp)
 {
 	file_t *dfp;
 	int error;
 
-	error = fd_getvnode(fd, &dfp);
+	error = fd_getvnode(fd, rights, &dfp);
 	if (error == 0) {
 		NDAT(ndp, dfp->f_vnode);
 		error = namei(ndp);
@@ -131,8 +132,8 @@ cloudabi_namei(struct lwp *l, cloudabi_fd_t fd, struct nameidata *ndp)
 
 /* Returns the vnode corresponding with a base directory and pathname. */
 int
-cloudabi_namei_simple(struct lwp *l, cloudabi_lookup_t fd, const char *path,
-    size_t pathlen, unsigned int flags, struct vnode **vp)
+cloudabi_namei_simple(struct lwp *l, cloudabi_lookup_t fd, cap_rights_t rights,
+    const char *path, size_t pathlen, unsigned int flags, struct vnode **vp)
 {
 	struct nameidata nd;
 	struct pathbuf *pb;
@@ -144,7 +145,7 @@ cloudabi_namei_simple(struct lwp *l, cloudabi_lookup_t fd, const char *path,
 	CLOUDABI_NDINIT(&nd, LOOKUP,
 	    ((fd & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) != 0 ?  FOLLOW : NOFOLLOW) |
 	    flags, pb);
-	error = cloudabi_namei(l, fd, &nd);
+	error = cloudabi_namei(l, fd, rights, &nd);
 	pathbuf_destroy(pb);
 	*vp = nd.ni_vp;
 	return (error);
@@ -205,14 +206,17 @@ cloudabi_sys_file_create(struct lwp *l,
 	struct pathbuf *pb;
 	struct vnode *vp;
 	enum vtype type;
+	cap_rights_t rights;
 	int error;
 
 	switch (SCARG(uap, type)) {
 	case CLOUDABI_FILETYPE_DIRECTORY:
 		type = VDIR;
+		rights = CAP_MKDIRAT;
 		break;
 	case CLOUDABI_FILETYPE_FIFO:
 		type = VFIFO;
+		rights = CAP_MKFIFOAT;
 		break;
 	default:
 		return (EINVAL);
@@ -225,7 +229,7 @@ cloudabi_sys_file_create(struct lwp *l,
 
 	CLOUDABI_NDINIT(&nd, CREATE,
 	    LOCKPARENT | (type == VDIR ? CREATEDIR : 0), pb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd), rights, &nd);
 	if (error != 0) {
 		pathbuf_destroy(pb);
 		return (error);
@@ -265,8 +269,8 @@ cloudabi_sys_file_link(struct lwp *l,
 	int error;
 
 	/* Look up source path. */
-	error = cloudabi_namei_simple(l, SCARG(uap, fd1), SCARG(uap, path1),
-	    SCARG(uap, path1len), 0, &vp);
+	error = cloudabi_namei_simple(l, SCARG(uap, fd1), CAP_LINKAT_SRC,
+	    SCARG(uap, path1), SCARG(uap, path1len), 0, &vp);
 	if (error != 0)
 		return (error);
 
@@ -276,7 +280,7 @@ cloudabi_sys_file_link(struct lwp *l,
 	if (error != 0)
 		goto out1;
 	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd2), &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd2), CAP_LINKAT_DEST, &nd);
 	if (error != 0)
 		goto out2;
 
@@ -374,7 +378,8 @@ cloudabi_sys_file_open(struct lwp *l,
 		return (error);
 
 	/* Obtain the directory from where to do the lookup. */
-	error = fd_getvnode(SCARG(uap, fd), &dfp);
+	/* TODO(ed): Use the proper rights! */
+	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &dfp);
 	if (error != 0) {
 		if (error == EINVAL)
 			error = ENOTDIR;
@@ -469,7 +474,7 @@ cloudabi_sys_file_readdir(struct lwp *l,
 	cloudabi_dircookie_t offset;
 	int error;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp);
 	if (error != 0)
 		return (error == EINVAL ? ENOTDIR : error);
 
@@ -575,8 +580,8 @@ cloudabi_sys_file_readlink(struct lwp *l,
 	int error;
 
 	/* Look up pathname. */
-	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, pathlen), LOCKLEAF, &vp);
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), CAP_READLINKAT,
+	    SCARG(uap, path), SCARG(uap, pathlen), LOCKLEAF, &vp);
 	if (error != 0)
 		return (error);
 
@@ -641,7 +646,7 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 * insane, so for the time being we need to leave it like this.
 	 */
 	CLOUDABI_NDINIT(&fnd, DELETE, LOCKPARENT | INRENAME, fpb);
-	error = cloudabi_namei(l, SCARG(uap, oldfd), &fnd);
+	error = cloudabi_namei(l, SCARG(uap, oldfd), CAP_RENAMEAT_SRC, &fnd);
 	if (error != 0)
 		goto out2;
 
@@ -695,7 +700,8 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 */
 	CLOUDABI_NDINIT(&tnd, RENAME, LOCKPARENT | NOCACHE | INRENAME |
 	    ((fvp->v_type == VDIR)? CREATEDIR : 0), tpb);
-	error = cloudabi_namei(l, SCARG(uap, newfd), &tnd);
+	error = cloudabi_namei(l, SCARG(uap, newfd), CAP_RENAMEAT_DEST,
+	    &tnd);
 	if (error != 0)
 		goto abort0;
 
@@ -983,9 +989,9 @@ cloudabi_sys_file_stat_fget(struct lwp *l,
 	struct file *fp;
 	int error;
 
-	fp = fd_getfile(SCARG(uap, fd));
-	if (fp == NULL)
-		return (EBADF);
+	error = fd_getfile(SCARG(uap, fd), CAP_FSTAT, &fp);
+	if (error != 0)
+		return (error);
 
 	error = fp->f_ops->fo_stat(fp, &sb);
 	if (error != 0) {
@@ -1098,7 +1104,7 @@ cloudabi_sys_file_stat_fput(struct lwp *l,
 		return (sys_ftruncate(l, &sys_ftruncate_args, retval));
 	}
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_FUTIMES, &fp);
 	if (error != 0)
 		return (error);
 	error = do_stat_put(l, fp->f_vnode, SCARG(uap, buf), SCARG(uap, flags));
@@ -1116,8 +1122,8 @@ cloudabi_sys_file_stat_get(struct lwp *l,
 	int error;
 
 	/* Look up path. */
-	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, pathlen), LOCKLEAF, &vp);
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), CAP_FSTATAT,
+	    SCARG(uap, path), SCARG(uap, pathlen), LOCKLEAF, &vp);
 	if (error != 0)
 		return (error);
 
@@ -1157,8 +1163,8 @@ cloudabi_sys_file_stat_put(struct lwp *l,
 	int error;
 
 	/* Look up path. */
-	error = cloudabi_namei_simple(l, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, pathlen), 0, &vp);
+	error = cloudabi_namei_simple(l, SCARG(uap, fd), CAP_FUTIMESAT,
+	    SCARG(uap, path), SCARG(uap, pathlen), 0, &vp);
 	if (error != 0)
 		return (error);
 
@@ -1197,7 +1203,7 @@ cloudabi_sys_file_symlink(struct lwp *l,
 	path[SCARG(uap, path1len)] = '\0';
 
 	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT, linkpb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd), CAP_SYMLINKAT, &nd);
 	if (error != 0)
 		goto out;
 	if (nd.ni_vp) {
@@ -1244,7 +1250,7 @@ cloudabi_sys_file_unlink(struct lwp *l,
 	}
 
 	CLOUDABI_NDINIT(&nd, DELETE, LOCKPARENT | LOCKLEAF, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd), &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd), CAP_UNLINKAT, &nd);
 	if (error != 0)
 		goto out;
 	vp = nd.ni_vp;

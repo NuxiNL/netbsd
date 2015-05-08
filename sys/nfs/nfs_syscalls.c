@@ -150,8 +150,9 @@ sys_nfssvc(struct lwp *l, const struct sys_nfssvc_args *uap, register_t *retval)
 		if (error)
 			return (error);
 		/* getsock() will use the descriptor for us */
-		if ((fp = fd_getfile(nfsdarg.sock)) == NULL)
-			return (EBADF);
+		error = fd_getfile(nfsdarg.sock, CAP_OTHER, &fp);
+		if (error != 0)
+			return (error);
 		if (fp->f_type != DTYPE_SOCKET) {
 			fd_putfile(nfsdarg.sock);
 			return (ENOTSOCK);

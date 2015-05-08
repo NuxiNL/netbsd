@@ -433,7 +433,7 @@ gre_socreate(struct gre_softc *sc, const struct gre_soparm *sp, int *fdout)
 		return rc;
 	}
 
-	if ((rc = fd_getsock(fd, &so)) != 0)
+	if ((rc = fd_getsock(fd, CAP_OTHER, &so)) != 0)
 		return rc;
 
 	if ((m = getsombuf(so, MT_SONAME)) == NULL) {
@@ -1027,7 +1027,7 @@ static bool
 gre_fp_recv(struct gre_softc *sc)
 {
 	int fd, ofd, rc;
-	file_t *fp;
+	file_t *fp, *tfp;
 
 	fp = sc->sc_fp;
 	ofd = sc->sc_fd;
@@ -1048,7 +1048,7 @@ gre_fp_recv(struct gre_softc *sc)
 		/*FALLTHROUGH*/
 	case GRE_M_DELFP:
 		mutex_exit(&sc->sc_mtx);
-		if (ofd != -1 && fd_getfile(ofd) != NULL)
+		if (ofd != -1 && fd_getfile(ofd, CAP_OTHER, &tfp) == 0)
 			fd_close(ofd);
 		mutex_enter(&sc->sc_mtx);
 		sc->sc_fd = fd;
@@ -1086,15 +1086,16 @@ gre_fp_send(struct gre_softc *sc, enum gre_msg msg, file_t *fp)
 static int
 gre_ssock(struct ifnet *ifp, struct gre_soparm *sp, int fd)
 {
-	int error = 0;
+	int error;
 	const struct protosw *pr;
 	file_t *fp;
 	struct gre_softc *sc = ifp->if_softc;
 	struct socket *so;
 	struct sockaddr_storage dst, src;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	error = fd_getfile(fd, CAP_OTHER, &fp);
+	if (error != 0)
+		return (error);
 	if (fp->f_type != DTYPE_SOCKET) {
 		fd_putfile(fd);
 		return ENOTSOCK;
@@ -1186,6 +1187,7 @@ gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 	struct gre_soparm *sp;
 	int fd, error = 0, oproto, otype, s;
 	struct gre_soparm sp0;
+	file_t *tfp;
 
 	ifr = data;
 
@@ -1376,7 +1378,7 @@ gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 		if (cmd != GRESSOCK) {
 			GRE_DPRINTF(sc, "\n");
 			/* XXX v. dodgy */
-			if (fd_getfile(fd) != NULL)
+			if (fd_getfile(fd, CAP_OTHER, &tfp) == 0)
 				fd_close(fd);
 		}
 
