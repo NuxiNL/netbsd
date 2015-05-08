@@ -224,8 +224,8 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
 }
 
 /* Converts a file descriptor to a CloudABI file descriptor type. */
-static cloudabi_filetype_t
-convert_filetype(const struct file *fp)
+cloudabi_filetype_t
+cloudabi_convert_filetype(const struct file *fp)
 {
 
 	switch (fp->f_type) {
@@ -293,7 +293,7 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 		return (EBADF);
 	oflags = OFLAGS(fp->f_flag);
 	fd_putfile(SCARG(uap, fd));
-	fsb.fs_filetype = convert_filetype(fp);
+	fsb.fs_filetype = cloudabi_convert_filetype(fp);
 
 	/* Convert file descriptor flags. */
 	if (oflags & O_APPEND)

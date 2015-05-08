@@ -971,23 +971,6 @@ convert_stat(struct file *fp, const struct stat *sb, cloudabi_filestat_t *csb)
 		.st_ctim	= convert_timestamp(&sb->st_ctim),
 	};
 
-	if (S_ISBLK(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_BLOCK_DEVICE;
-	else if (S_ISCHR(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_CHARACTER_DEVICE;
-	else if (S_ISDIR(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_DIRECTORY;
-	else if (S_ISFIFO(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_FIFO;
-	else if (S_ISREG(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_REGULAR_FILE;
-	else if (S_ISSOCK(sb->st_mode)) {
-		/* Inaccurate, but the best that we can do. */
-		res.st_filetype = CLOUDABI_FILETYPE_SOCKET_STREAM;
-	} else if (S_ISLNK(sb->st_mode))
-		res.st_filetype = CLOUDABI_FILETYPE_SYMBOLIC_LINK;
-	else
-		res.st_filetype = CLOUDABI_FILETYPE_UNKNOWN;
 	*csb = res;
 }
 
@@ -1012,6 +995,7 @@ cloudabi_sys_file_stat_fget(struct lwp *l,
 
 	/* Convert results and return them. */
 	convert_stat(fp, &sb, &csb);
+	csb.st_filetype = cloudabi_convert_filetype(fp);
 	fd_putfile(SCARG(uap, fd));
 	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
@@ -1145,6 +1129,23 @@ cloudabi_sys_file_stat_get(struct lwp *l,
 
 	/* Convert to CloudABI's format. */
 	convert_stat(NULL, &sb, &csb);
+	if (S_ISBLK(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_BLOCK_DEVICE;
+	else if (S_ISCHR(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_CHARACTER_DEVICE;
+	else if (S_ISDIR(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_DIRECTORY;
+	else if (S_ISFIFO(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_FIFO;
+	else if (S_ISREG(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_REGULAR_FILE;
+	else if (S_ISSOCK(sb.st_mode)) {
+		/* Inaccurate, but the best that we can do. */
+		csb.st_filetype = CLOUDABI_FILETYPE_SOCKET_STREAM;
+	} else if (S_ISLNK(sb.st_mode))
+		csb.st_filetype = CLOUDABI_FILETYPE_SYMBOLIC_LINK;
+	else
+		csb.st_filetype = CLOUDABI_FILETYPE_UNKNOWN;
 	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
 }
 
