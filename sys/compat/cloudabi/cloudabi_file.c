@@ -388,7 +388,7 @@ cloudabi_sys_file_open(struct lwp *l,
 
 	/* Allocate a new file descriptor. */
 	/* TODO(ed): Use proper rights. */
-	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, CAP_ALL_MASK, &fd);
 	if (error != 0)
 		goto out2;
 

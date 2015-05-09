@@ -178,6 +178,7 @@ typedef struct fdfile {
 	SLIST_HEAD(,knote) ff_knlist;	/* d: knotes attached to this fd */
 	kcondvar_t	ff_closing;	/* d: notifier for close */
 	cap_rights_t	ff_rights_base;	/* d: descriptor base rights */
+	cap_rights_t	ff_rights_inheriting; /* d: inheriting rights */
 } fdfile_t;
 
 /* Reference count */
@@ -251,9 +252,9 @@ struct proc;
 void	fd_sys_init(void);
 int	fd_open(const char*, int, int, int*);
 int	fd_dupopen(int, int *, int, int);
-int	fd_alloc(struct proc *, int, cap_rights_t, int *);
+int	fd_alloc(struct proc *, int, cap_rights_t, cap_rights_t, int *);
 void	fd_tryexpand(struct proc *);
-int	fd_allocfile(file_t **, cap_rights_t, int *);
+int	fd_allocfile(file_t **, cap_rights_t, cap_rights_t, int *);
 void	fd_affix(struct proc *, file_t *, unsigned);
 void	fd_abort(struct proc *, file_t *, unsigned);
 filedesc_t *fd_copy(void);

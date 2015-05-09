@@ -158,7 +158,7 @@ pty_alloc_master(struct lwp *l, int *fd, dev_t *dev, struct mount *mp)
 	struct vnode *vp;
 	int md;
 
-	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, fd)) != 0) {
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, 0, fd)) != 0) {
 		DPRINTF(("fd_allocfile %d\n", error));
 		return error;
 	}
@@ -257,7 +257,7 @@ pty_alloc_slave(struct lwp *l, int *fd, dev_t dev, struct mount *mp)
 	struct vnode *vp;
 
 	/* Grab a filedescriptor for the slave */
-	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, fd)) != 0) {
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, 0, fd)) != 0) {
 		DPRINTF(("fd_allocfile %d\n", error));
 		return error;
 	}

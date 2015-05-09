@@ -297,7 +297,7 @@ drm_open(dev_t d, int flags, int fmt, struct lwp *l)
 			goto fail2;
 	}
 
-	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd);
 	if (error)
 		goto fail2;
 

@@ -264,12 +264,12 @@ pipe1(struct lwp *l, register_t *retval, int flags, cap_rights_t rights1,
 	wpipe->pipe_lock = rpipe->pipe_lock;
 	mutex_obj_hold(wpipe->pipe_lock);
 
-	error = fd_allocfile(&rf, rights1, &fd);
+	error = fd_allocfile(&rf, rights1, 0, &fd);
 	if (error)
 		goto free2;
 	retval[0] = fd;
 
-	error = fd_allocfile(&wf, rights2, &fd);
+	error = fd_allocfile(&wf, rights2, 0, &fd);
 	if (error)
 		goto free3;
 	retval[1] = fd;

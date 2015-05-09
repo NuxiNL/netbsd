@@ -1446,7 +1446,9 @@ unp_externalize(struct mbuf *rights, struct lwp *l, int flags)
 	 * new files.
 	 */
 	for (size_t i = 0; i < nfds; i++) {
-		if ((error = fd_alloc(p, 0, CAP_ALL_MASK, &fdp[i])) != 0) {
+		/* TODO(ed): Apply original rights. */
+		if ((error = fd_alloc(p, 0, CAP_ALL_MASK, CAP_ALL_MASK,
+		    &fdp[i])) != 0) {
 			/*
 			 * Back out what we've done so far.
 			 */

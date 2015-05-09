@@ -221,7 +221,7 @@ rndopen(dev_t dev, int flags, int fmt, struct lwp *l)
 		return ENXIO;
 	}
 
-	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd);
 	if (error)
 		return error;
 

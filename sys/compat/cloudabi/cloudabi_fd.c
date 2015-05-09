@@ -96,14 +96,40 @@ cloudabi_sys_fd_close(struct lwp *l,
 }
 
 static int
+makesocket(struct lwp *l, file_t **fp, int *fd, int type, struct socket *soo)
+{
+	struct socket *so;
+	int error;
+
+	error = socreate(AF_UNIX, &so, type, 0, l, soo);
+	if (error != 0)
+		return (error);
+	error = fd_allocfile(fp, CAP_EVENT | CAP_FCNTL_SETFL | CAP_FSTAT |
+	    CAP_SOCK_CLIENT | CAP_SOCK_SERVER, CAP_ALL_MASK, fd);
+	if (error != 0) {
+		soclose(so);
+		return (error);
+	}
+	(*fp)->f_flag = FREAD | FWRITE | FNOSIGPIPE;
+	(*fp)->f_type = DTYPE_SOCKET;
+	(*fp)->f_ops = &socketops;
+	(*fp)->f_socket = so;
+	return (0);
+}
+
+static int
 create_socket(struct lwp *l, int type, register_t *retval)
 {
-	struct compat_30_sys_socket_args compat_30_sys_socket_args;
+	file_t *fp;
+	proc_t *p = l->l_proc;
+	int fd, error;
 
-	SCARG(&compat_30_sys_socket_args, domain) = AF_UNIX;
-	SCARG(&compat_30_sys_socket_args, type) = type;
-	SCARG(&compat_30_sys_socket_args, protocol) = 0;
-	return (compat_30_sys_socket(l, &compat_30_sys_socket_args, retval));
+	error = makesocket(l, &fp, &fd, type, NULL);
+	if (error != 0)
+		return (error);
+	retval[0] = fd;
+	fd_affix(p, fp, retval[0]);
+	return (0);
 }
 
 int
@@ -127,28 +153,6 @@ cloudabi_sys_fd_create1(struct lwp *l,
 }
 
 static int
-makesocket(struct lwp *l, file_t **fp, int *fd, int domain, struct socket *soo)
-{
-	struct socket *so;
-	int error;
-
-	error = socreate(domain, &so, AF_UNIX, 0, l, soo);
-	if (error != 0)
-		return (error);
-	error = fd_allocfile(fp, CAP_EVENT | CAP_FCNTL_SETFL | CAP_FSTAT |
-	    CAP_SOCK_CLIENT | CAP_SOCK_SERVER, fd);
-	if (error != 0) {
-		soclose(so);
-		return (error);
-	}
-	(*fp)->f_flag = FREAD | FWRITE | FNOSIGPIPE;
-	(*fp)->f_type = DTYPE_SOCKET;
-	(*fp)->f_ops = &socketops;
-	(*fp)->f_socket = so;
-	return (0);
-}
-
-static int
 create_socketpair(struct lwp *l, int type, register_t *retval)
 {
 	file_t *fp1, *fp2;
@@ -157,13 +161,13 @@ create_socketpair(struct lwp *l, int type, register_t *retval)
 	int fd, error;
 
 	error = makesocket(l, &fp1, &fd, type, NULL);
-	if (error)
+	if (error != 0)
 		return (error);
 	so1 = fp1->f_socket;
 	retval[0] = fd;
 
 	error = makesocket(l, &fp2, &fd, type, so1);
-	if (error)
+	if (error != 0)
 		goto out1;
 	so2 = fp2->f_socket;
 	retval[1] = fd;
@@ -295,8 +299,10 @@ cloudabi_convert_filetype(const struct file *fp)
 			return (CLOUDABI_FILETYPE_SOCKET_DGRAM);
 		case SOCK_SEQPACKET:
 			return (CLOUDABI_FILETYPE_SOCKET_SEQPACKET);
-		default:
+		case SOCK_STREAM:
 			return (CLOUDABI_FILETYPE_SOCKET_STREAM);
+		default:
+			return (CLOUDABI_FILETYPE_UNKNOWN);
 		}
 	}
 	case DTYPE_VNODE: {

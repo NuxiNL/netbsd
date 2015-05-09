@@ -169,6 +169,7 @@ do_sys_accept(struct lwp *l, int sock, struct mbuf **name,
 	int		error, fd;
 	struct socket	*so, *so2;
 	short		wakeup_state = 0;
+	cap_rights_t	rights_base, rights_inheriting;
 
 	error = fd_getfile(sock, CAP_ACCEPT, &fp);
 	if (error != 0)
@@ -177,7 +178,9 @@ do_sys_accept(struct lwp *l, int sock, struct mbuf **name,
 		fd_putfile(sock);
 		return ENOTSOCK;
 	}
-	if ((error = fd_allocfile(&fp2, CAP_ALL_MASK, &fd)) != 0) {
+	fd_getrights(sock, &rights_base, &rights_inheriting);
+	if ((error = fd_allocfile(&fp2, rights_inheriting, rights_inheriting,
+	    &fd)) != 0) {
 		fd_putfile(sock);
 		return error;
 	}
@@ -421,7 +424,7 @@ makesocket(struct lwp *l, file_t **fp, int *fd, int flags, int type,
 		so->so_state |= SS_NBIO;
 	}
 
-	if ((error = fd_allocfile(fp, CAP_ALL_MASK, fd)) != 0) {
+	if ((error = fd_allocfile(fp, CAP_ALL_MASK, CAP_ALL_MASK, fd)) != 0) {
 		soclose(so);
 		return error;
 	}
@@ -1262,14 +1265,14 @@ pipe1(struct lwp *l, register_t *retval, int flags)
 	/* remember this socket pair implements a pipe */
 	wso->so_state |= SS_ISAPIPE;
 	rso->so_state |= SS_ISAPIPE;
-	if ((error = fd_allocfile(&rf, &fd)) != 0)
+	if ((error = fd_allocfile(&rf, CAP_ALL_MASK, CAP_ALL_MASK, &fd)) != 0)
 		goto free2;
 	retval[0] = fd;
 	rf->f_flag = FREAD | flags;
 	rf->f_type = DTYPE_SOCKET;
 	rf->f_ops = &socketops;
 	rf->f_socket = rso;
-	if ((error = fd_allocfile(&wf, &fd)) != 0)
+	if ((error = fd_allocfile(&wf, CAP_ALL_MASK, CAP_ALL_MASK, &fd)) != 0)
 		goto free3;
 	wf->f_flag = FWRITE | flags;
 	wf->f_type = DTYPE_SOCKET;

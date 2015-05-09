@@ -169,7 +169,7 @@ drvctlopen(dev_t dev, int flags, int mode, struct lwp *l)
 	int fd;
 	int ret;
 
-	ret = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
+	ret = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd);
 	if (ret)
 		return ret;
 

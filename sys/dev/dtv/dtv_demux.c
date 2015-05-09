@@ -308,7 +308,7 @@ dtv_demux_open(struct dtv_softc *sc, int flags, int mode, lwp_t *l)
 	mutex_init(&demux->dd_lock, MUTEX_DEFAULT, IPL_SCHED);
 	cv_init(&demux->dd_section_cv, "dtvsec");
 
-	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd);
 	if (error) {
 		kmem_free(demux, sizeof(*demux));
 		return error;

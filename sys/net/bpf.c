@@ -438,7 +438,7 @@ bpfopen(dev_t dev, int flag, int mode, struct lwp *l)
 	int error, fd;
 
 	/* falloc() will use the descriptor for us. */
-	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd)) != 0)
 		return error;
 
 	d = malloc(sizeof(*d), M_DEVBUF, M_WAITOK|M_ZERO);

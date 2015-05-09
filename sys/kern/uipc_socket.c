@@ -581,7 +581,7 @@ fsocreate(int domain, struct socket **sop, int type, int proto, int *fdout)
 	struct socket *so;
 	struct file *fp;
 
-	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0) {
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, CAP_ALL_MASK, &fd)) != 0) {
 		return error;
 	}
 	flags = type & SOCK_FLAGS_MASK;

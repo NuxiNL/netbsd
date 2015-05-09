@@ -1565,7 +1565,9 @@ do_open(lwp_t *l, struct vnode *dvp, struct pathbuf *pb, int open_flags,
 	if ((flags & (FREAD | FWRITE)) == 0)
 		return EINVAL;
 
-	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &indx)) != 0) {
+	/* TODO(ed): Fix. */
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, CAP_ALL_MASK,
+	    &indx)) != 0) {
 		return error;
 	}
 
@@ -1976,7 +1978,8 @@ dofhopen(struct lwp *l, const void *ufhp, size_t fhsize, int oflags,
 		return (EINVAL);
 	if ((flags & O_CREAT))
 		return (EINVAL);
-	if ((error = fd_allocfile(&nfp, CAP_ALL_MASK, &indx)) != 0)
+	if ((error = fd_allocfile(&nfp, CAP_ALL_MASK, CAP_ALL_MASK,
+	    &indx)) != 0)
 		return (error);
 	fp = nfp;
 	error = vfs_copyinfh_alloc(ufhp, fhsize, &fh);

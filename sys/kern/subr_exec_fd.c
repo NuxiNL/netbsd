@@ -99,7 +99,7 @@ fd_checkstd(void)
 			continue;
 		snprintf(which, sizeof(which), ",%d", i);
 		strlcat(closed, which, sizeof(closed));
-		if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
+		if ((error = fd_allocfile(&fp, CAP_ALL_MASK, 0, &fd)) != 0)
 			return (error);
 		KASSERT(fd < CHECK_UPTO);
 		pb = pathbuf_create("/dev/null");

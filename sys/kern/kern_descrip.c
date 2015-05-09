@@ -285,7 +285,8 @@ fd_last_set(filedesc_t *fd, int last)
 }
 
 static inline void
-fd_used(filedesc_t *fdp, unsigned fd, cap_rights_t rights_base)
+fd_used(filedesc_t *fdp, unsigned fd, cap_rights_t rights_base,
+    cap_rights_t rights_inheriting)
 {
 	u_int off = fd >> NDENTRYSHIFT;
 	fdfile_t *ff;
@@ -299,6 +300,7 @@ fd_used(filedesc_t *fdp, unsigned fd, cap_rights_t rights_base)
 	KASSERT(!ff->ff_allocated);
 
 	ff->ff_rights_base = rights_base;
+	ff->ff_rights_inheriting = rights_inheriting;
 	ff->ff_allocated = true;
 	fdp->fd_lomap[off] |= 1 << (fd & NDENTRYMASK);
 	if (__predict_false(fdp->fd_lomap[off] == ~0)) {
@@ -430,8 +432,7 @@ fd_getrights(unsigned fd, cap_rights_t *base, cap_rights_t *inheriting)
 	fdp = curlwp->l_fd;
 	ff = fdp->fd_dt->dt_ff[fd];
 	*base = ff->ff_rights_base;
-	/* TODO(ed): Implement. */
-	*inheriting = CAP_ALL_MASK;
+	*inheriting = ff->ff_rights_inheriting;
 }
 
 /*
@@ -759,7 +760,8 @@ fd_dup(int oldfd, int minfd, int *newp, bool exclose)
 	p = l->l_proc;
 	dt = l->l_fd->fd_dt;
 	off = dt->dt_ff[oldfd];
-	while ((error = fd_alloc(p, minfd, off->ff_rights_base, newp)) != 0) {
+	while ((error = fd_alloc(p, minfd, off->ff_rights_base,
+	    off->ff_rights_inheriting, newp)) != 0) {
 		if (error != ENOSPC) {
 			return error;
 		}
@@ -820,7 +822,7 @@ fd_dup2(int oldfd, unsigned newfd, int flags)
 		ff = NULL;
 	}
 	off = fdp->fd_dt->dt_ff[oldfd];
-	fd_used(fdp, newfd, off->ff_rights_base);
+	fd_used(fdp, newfd, off->ff_rights_base, off->ff_rights_inheriting);
 	mutex_exit(&fdp->fd_lock);
 
 	dt->dt_ff[newfd]->ff_exclose = (flags & O_CLOEXEC) != 0;
@@ -880,7 +882,8 @@ closef(file_t *fp)
  * Allocate a file descriptor for the process.
  */
 int
-fd_alloc(proc_t *p, int want, cap_rights_t rights_base, int *result)
+fd_alloc(proc_t *p, int want, cap_rights_t rights_base,
+    cap_rights_t rights_inheriting, int *result)
 {
 	filedesc_t *fdp = p->p_fd;
 	int i, lim, last, error, hi;
@@ -926,7 +929,7 @@ fd_alloc(proc_t *p, int want, cap_rights_t rights_base, int *result)
 			dt->dt_ff[i] = pool_cache_get(fdfile_cache, PR_WAITOK);
 		}
 		KASSERT(dt->dt_ff[i]->ff_file == NULL);
-		fd_used(fdp, i, rights_base);
+		fd_used(fdp, i, rights_base, rights_inheriting);
 		if (want <= fdp->fd_freefile) {
 			fdp->fd_freefile = i;
 		}
@@ -1116,14 +1119,16 @@ fd_tryexpand(proc_t *p)
  * for the current process.
  */
 int
-fd_allocfile(file_t **resultfp, cap_rights_t rights_base, int *resultfd)
+fd_allocfile(file_t **resultfp, cap_rights_t rights_base,
+    cap_rights_t rights_inheriting, int *resultfd)
 {
 	proc_t *p = curproc;
 	kauth_cred_t cred;
 	file_t *fp;
 	int error;
 
-	while ((error = fd_alloc(p, 0, rights_base, resultfd)) != 0) {
+	while ((error = fd_alloc(p, 0, rights_base, rights_inheriting,
+	    resultfd)) != 0) {
 		if (error != ENOSPC) {
 			return error;
 		}
@@ -1525,6 +1530,7 @@ fd_copy(void)
 		ff2->ff_file = fp;
 		ff2->ff_exclose = ff->ff_exclose;
 		ff2->ff_rights_base = ff->ff_rights_base;
+		ff2->ff_rights_inheriting = ff->ff_rights_inheriting;
 		ff2->ff_allocated = true;
 
 		/* Fix up bitmaps. */

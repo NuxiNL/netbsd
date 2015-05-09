@@ -739,7 +739,7 @@ kqueue1(struct lwp *l, register_t *retval, int flags, cap_rights_t rights)
 	file_t *fp;
 	int fd, error;
 
-	if ((error = fd_allocfile(&fp, rights, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, rights, 0, &fd)) != 0)
 		return error;
 	fp->f_flag = FREAD | FWRITE | (flags & (FNONBLOCK|FNOSIGPIPE));
 	fp->f_type = DTYPE_KQUEUE;
