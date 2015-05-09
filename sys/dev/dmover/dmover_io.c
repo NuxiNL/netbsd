@@ -789,7 +789,7 @@ dmoverioopen(dev_t dev, int flag, int mode, struct lwp *l)
 	struct file *fp;
 	int error, fd;
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		return (error);
 
 	ds = dmio_state_get();

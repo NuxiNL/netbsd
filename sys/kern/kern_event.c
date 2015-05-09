@@ -732,14 +732,14 @@ seltrue_kqfilter(dev_t dev, struct knote *kn)
 /*
  * kqueue(2) system call.
  */
-static int
-kqueue1(struct lwp *l, int flags, register_t *retval)
+int
+kqueue1(struct lwp *l, register_t *retval, int flags, cap_rights_t rights)
 {
 	struct kqueue *kq;
 	file_t *fp;
 	int fd, error;
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, rights, &fd)) != 0)
 		return error;
 	fp->f_flag = FREAD | FWRITE | (flags & (FNONBLOCK|FNOSIGPIPE));
 	fp->f_type = DTYPE_KQUEUE;
@@ -763,7 +763,7 @@ kqueue1(struct lwp *l, int flags, register_t *retval)
 int
 sys_kqueue(struct lwp *l, const void *v, register_t *retval)
 {
-	return kqueue1(l, 0, retval);
+	return kqueue1(l, retval, 0, CAP_ALL_MASK);
 }
 
 int
@@ -773,7 +773,7 @@ sys_kqueue1(struct lwp *l, const struct sys_kqueue1_args *uap,
 	/* {
 		syscallarg(int) flags;
 	} */
-	return kqueue1(l, SCARG(uap, flags), retval);
+	return kqueue1(l, retval, SCARG(uap, flags), CAP_ALL_MASK);
 }
 
 /*
@@ -917,7 +917,7 @@ kevent1_anonymous(register_t *retval, const struct kevent *changelist,
 	int error;
 
 	/* TODO(ed): Implement this without using a file descriptor. */
-	error = kqueue1(curlwp, 0, fd);
+	error = kqueue1(curlwp, fd, 0, CAP_ALL_MASK);
 	if (error != 0)
 		return (error);
 	error = kevent1(retval, fd[0], changelist, nchanges, eventlist, nevents,
@@ -962,7 +962,8 @@ kqueue_register(struct kqueue *kq, struct kevent *kev)
 	if (kfilter->filtops->f_isfd) {
 		/* monitoring a file descriptor */
 		fd = kev->ident;
-		error = fd_getfile(fd, CAP_EVENT, &fp);
+		error = fd_getfile(fd, kev->filter == EVFILT_PROCDESC ?
+		    CAP_PDWAIT : CAP_EVENT, &fp);
 		if (error != 0) {
 			rw_exit(&kqueue_filter_lock);
 			kmem_free(newkn, sizeof(*newkn));

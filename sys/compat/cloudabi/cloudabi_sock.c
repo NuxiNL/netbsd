@@ -92,7 +92,7 @@ cloudabi_sys_sock_accept(struct lwp *l,
 
 	error = do_sys_accept(l, SCARG(uap, s), &name, retval, NULL, 0, 0);
 	if (error != 0)
-		return (error);
+		return (error == ENOTCAPABLE ? ENOTSOCK : error);
 
 	memset(&ss, '\0', sizeof(ss));
 	if (name != NULL) {
@@ -337,7 +337,7 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
 	error = fd_getsock(SCARG(uap, fd),
 	    CAP_GETSOCKOPT | CAP_GETPEERNAME | CAP_GETSOCKNAME, &so);
 	if (error != 0)
-		return (error);
+		return (error == ENOTCAPABLE ? ENOTSOCK : error);
 	memset(&ss, '\0', sizeof(ss));
 	solock(so);
 
@@ -380,10 +380,12 @@ cloudabi_sys_sock_listen(struct lwp *l,
     const struct cloudabi_sys_sock_listen_args *uap, register_t *retval)
 {
 	struct sys_listen_args sys_listen_args;
+	int error;
 
 	SCARG(&sys_listen_args, s) = SCARG(uap, s);
 	SCARG(&sys_listen_args, backlog) = SCARG(uap, backlog);
-	return (sys_listen(l, &sys_listen_args, retval));
+	error = sys_listen(l, &sys_listen_args, retval);
+	return (error == ENOTCAPABLE ? ENOTSOCK : error);
 }
 
 int
@@ -391,6 +393,7 @@ cloudabi_sys_sock_shutdown(struct lwp *l,
     const struct cloudabi_sys_sock_shutdown_args *uap, register_t *retval)
 {
 	struct sys_shutdown_args sys_shutdown_args;
+	int error;
 
 	SCARG(&sys_shutdown_args, s) = SCARG(uap, fd);
 	switch (SCARG(uap, how)) {
@@ -406,5 +409,6 @@ cloudabi_sys_sock_shutdown(struct lwp *l,
 	default:
 		return (EINVAL);
 	}
-	return (sys_shutdown(l, &sys_shutdown_args, retval));
+	error = sys_shutdown(l, &sys_shutdown_args, retval);
+	return (error == ENOTCAPABLE ? ENOTSOCK : error);
 }

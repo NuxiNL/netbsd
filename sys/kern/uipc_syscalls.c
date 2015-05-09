@@ -177,7 +177,7 @@ do_sys_accept(struct lwp *l, int sock, struct mbuf **name,
 		fd_putfile(sock);
 		return ENOTSOCK;
 	}
-	if ((error = fd_allocfile(&fp2, &fd)) != 0) {
+	if ((error = fd_allocfile(&fp2, CAP_ALL_MASK, &fd)) != 0) {
 		fd_putfile(sock);
 		return error;
 	}
@@ -421,7 +421,7 @@ makesocket(struct lwp *l, file_t **fp, int *fd, int flags, int type,
 		so->so_state |= SS_NBIO;
 	}
 
-	if ((error = fd_allocfile(fp, fd)) != 0) {
+	if ((error = fd_allocfile(fp, CAP_ALL_MASK, fd)) != 0) {
 		soclose(so);
 		return error;
 	}

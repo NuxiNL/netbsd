@@ -269,7 +269,7 @@ cloudabi_sys_file_link(struct lwp *l,
 	int error;
 
 	/* Look up source path. */
-	error = cloudabi_namei_simple(l, SCARG(uap, fd1), CAP_LINKAT_SRC,
+	error = cloudabi_namei_simple(l, SCARG(uap, fd1), CAP_LINKAT_SOURCE,
 	    SCARG(uap, path1), SCARG(uap, path1len), 0, &vp);
 	if (error != 0)
 		return (error);
@@ -280,7 +280,7 @@ cloudabi_sys_file_link(struct lwp *l,
 	if (error != 0)
 		goto out1;
 	CLOUDABI_NDINIT(&nd, CREATE, LOCKPARENT, pb);
-	error = cloudabi_namei(l, SCARG(uap, fd2), CAP_LINKAT_DEST, &nd);
+	error = cloudabi_namei(l, SCARG(uap, fd2), CAP_LINKAT_TARGET, &nd);
 	if (error != 0)
 		goto out2;
 
@@ -379,7 +379,7 @@ cloudabi_sys_file_open(struct lwp *l,
 
 	/* Obtain the directory from where to do the lookup. */
 	/* TODO(ed): Use the proper rights! */
-	error = fd_getvnode(SCARG(uap, fd), CAP_OTHER, &dfp);
+	error = fd_getvnode(SCARG(uap, fd), CAP_LOOKUP, &dfp);
 	if (error != 0) {
 		if (error == EINVAL)
 			error = ENOTDIR;
@@ -387,7 +387,8 @@ cloudabi_sys_file_open(struct lwp *l,
 	}
 
 	/* Allocate a new file descriptor. */
-	error = fd_allocfile(&fp, &fd);
+	/* TODO(ed): Use proper rights. */
+	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
 	if (error != 0)
 		goto out2;
 
@@ -476,7 +477,8 @@ cloudabi_sys_file_readdir(struct lwp *l,
 
 	error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp);
 	if (error != 0)
-		return (error == EINVAL ? ENOTDIR : error);
+		return (error == EINVAL || error == ENOTCAPABLE ?
+		    ENOTDIR : error);
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(SCARG(uap, fd));
@@ -646,7 +648,7 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 * insane, so for the time being we need to leave it like this.
 	 */
 	CLOUDABI_NDINIT(&fnd, DELETE, LOCKPARENT | INRENAME, fpb);
-	error = cloudabi_namei(l, SCARG(uap, oldfd), CAP_RENAMEAT_SRC, &fnd);
+	error = cloudabi_namei(l, SCARG(uap, oldfd), CAP_RENAMEAT_SOURCE, &fnd);
 	if (error != 0)
 		goto out2;
 
@@ -700,7 +702,7 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 */
 	CLOUDABI_NDINIT(&tnd, RENAME, LOCKPARENT | NOCACHE | INRENAME |
 	    ((fvp->v_type == VDIR)? CREATEDIR : 0), tpb);
-	error = cloudabi_namei(l, SCARG(uap, newfd), CAP_RENAMEAT_DEST,
+	error = cloudabi_namei(l, SCARG(uap, newfd), CAP_RENAMEAT_TARGET,
 	    &tnd);
 	if (error != 0)
 		goto abort0;

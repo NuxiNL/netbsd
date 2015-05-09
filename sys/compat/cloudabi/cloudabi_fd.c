@@ -39,6 +39,50 @@ __KERNEL_RCSID(0, "$NetBSD$");
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 #include <compat/cloudabi/cloudabi_util.h>
 
+#define RIGHT_MAPPINGS \
+	MAPPING(CLOUDABI_RIGHT_FD_DATASYNC, CAP_FDATASYNC)		\
+	MAPPING(CLOUDABI_RIGHT_FD_READ, CAP_READ)			\
+	MAPPING(CLOUDABI_RIGHT_FD_SEEK, CAP_JUST_SEEK)			\
+	MAPPING(CLOUDABI_RIGHT_FD_STAT_PUT_FLAGS, CAP_FCNTL_SETFL)	\
+	MAPPING(CLOUDABI_RIGHT_FD_SYNC, CAP_FSYNC)			\
+	MAPPING(CLOUDABI_RIGHT_FD_TELL, CAP_SEEK_TELL)			\
+	MAPPING(CLOUDABI_RIGHT_FD_WRITE, CAP_WRITE)			\
+	MAPPING(CLOUDABI_RIGHT_FILE_ADVISE, CAP_POSIX_FADVISE)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_ALLOCATE, CAP_POSIX_FALLOCATE)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_CREATE_DIRECTORY, CAP_MKDIRAT)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_CREATE_FILE, CAP_CREATE)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_CREATE_FIFO, CAP_MKFIFOAT)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_LINK_SOURCE, CAP_LINKAT_SOURCE)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_LINK_TARGET, CAP_LINKAT_TARGET)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_OPEN, CAP_LOOKUP)			\
+	MAPPING(CLOUDABI_RIGHT_FILE_READDIR, CAP_GETDENTS)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_READLINK, CAP_READLINKAT)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_RENAME_SOURCE, CAP_RENAMEAT_SOURCE)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_RENAME_TARGET, CAP_RENAMEAT_TARGET)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_STAT_FGET, CAP_FSTAT)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_STAT_FPUT_SIZE, CAP_FTRUNCATE)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_STAT_FPUT_TIMES, CAP_FUTIMES)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_STAT_GET, CAP_FSTATAT)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_STAT_PUT_TIMES, CAP_FUTIMESAT)	\
+	MAPPING(CLOUDABI_RIGHT_FILE_SYMLINK, CAP_SYMLINKAT)		\
+	MAPPING(CLOUDABI_RIGHT_FILE_UNLINK, CAP_UNLINKAT)		\
+	MAPPING(CLOUDABI_RIGHT_MEM_MAP, CAP_MMAP)			\
+	MAPPING(CLOUDABI_RIGHT_MEM_MAP_EXEC, CAP_JUST_MMAP_X)		\
+	MAPPING(CLOUDABI_RIGHT_POLL_FD_READWRITE, CAP_EVENT)		\
+	MAPPING(CLOUDABI_RIGHT_POLL_MODIFY, CAP_KQUEUE_CHANGE)		\
+	MAPPING(CLOUDABI_RIGHT_POLL_PROC_TERMINATE, CAP_PDWAIT)		\
+	MAPPING(CLOUDABI_RIGHT_POLL_WAIT, CAP_KQUEUE_EVENT)		\
+	MAPPING(CLOUDABI_RIGHT_PROC_EXEC, CAP_FEXECVE)			\
+	MAPPING(CLOUDABI_RIGHT_SOCK_ACCEPT, CAP_ACCEPT)			\
+	MAPPING(CLOUDABI_RIGHT_SOCK_BIND_DIRECTORY, CAP_BINDAT)		\
+	MAPPING(CLOUDABI_RIGHT_SOCK_BIND_SOCKET, CAP_BIND)		\
+	MAPPING(CLOUDABI_RIGHT_SOCK_CONNECT_DIRECTORY, CAP_CONNECTAT)	\
+	MAPPING(CLOUDABI_RIGHT_SOCK_CONNECT_SOCKET, CAP_CONNECT)	\
+	MAPPING(CLOUDABI_RIGHT_SOCK_LISTEN, CAP_LISTEN)			\
+	MAPPING(CLOUDABI_RIGHT_SOCK_SHUTDOWN, CAP_SHUTDOWN)		\
+	MAPPING(CLOUDABI_RIGHT_SOCK_STAT_GET,				\
+	    CAP_GETPEERNAME | CAP_GETSOCKNAME | CAP_GETSOCKOPT)
+
 extern const struct fileops socketops;
 
 int
@@ -70,7 +114,7 @@ cloudabi_sys_fd_create1(struct lwp *l,
 	/* TODO(ed): Add support for shared memory. */
 	switch (SCARG(uap, type)) {
 	case CLOUDABI_FILETYPE_POLL:
-		return (sys_kqueue(l, NULL, retval));
+		return (kqueue1(l, retval, 0, CAP_FSTAT | CAP_KQUEUE));
 	case CLOUDABI_FILETYPE_SOCKET_DGRAM:
 		return (create_socket(l, SOCK_DGRAM, retval));
 	case CLOUDABI_FILETYPE_SOCKET_SEQPACKET:
@@ -91,7 +135,8 @@ makesocket(struct lwp *l, file_t **fp, int *fd, int domain, struct socket *soo)
 	error = socreate(domain, &so, AF_UNIX, 0, l, soo);
 	if (error != 0)
 		return (error);
-	error = fd_allocfile(fp, fd);
+	error = fd_allocfile(fp, CAP_EVENT | CAP_FCNTL_SETFL | CAP_FSTAT |
+	    CAP_SOCK_CLIENT | CAP_SOCK_SERVER, fd);
 	if (error != 0) {
 		soclose(so);
 		return (error);
@@ -151,7 +196,9 @@ cloudabi_sys_fd_create2(struct lwp *l,
 
 	switch (SCARG(uap, type)) {
 	case CLOUDABI_FILETYPE_FIFO:
-		return (sys_pipe(l, NULL, retval));
+		return (pipe1(l, retval, 0,
+		    CAP_EVENT | CAP_FCNTL_SETFL | CAP_FSTAT | CAP_READ,
+		    CAP_EVENT | CAP_FCNTL_SETFL | CAP_FSTAT | CAP_WRITE));
 	case CLOUDABI_FILETYPE_SOCKET_DGRAM:
 		return (create_socketpair(l, SOCK_DGRAM, retval));
 	case CLOUDABI_FILETYPE_SOCKET_SEQPACKET:
@@ -168,9 +215,11 @@ cloudabi_sys_fd_datasync(struct lwp *l,
     const struct cloudabi_sys_fd_datasync_args *uap, register_t *retval)
 {
 	struct sys_fdatasync_args sys_fdatasync_args;
+	int error;
 
 	SCARG(&sys_fdatasync_args, fd) = SCARG(uap, fd);
-	return (sys_fdatasync(l, &sys_fdatasync_args, retval));
+	error = sys_fdatasync(l, &sys_fdatasync_args, retval);
+	return (error == ENOTCAPABLE ? EBADF : error);
 }
 
 int
@@ -202,6 +251,7 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
     register_t *retval)
 {
 	struct sys_lseek_args sys_lseek_args;
+	int error;
 
 	SCARG(&sys_lseek_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_lseek_args, offset) = SCARG(uap, offset);
@@ -220,7 +270,8 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
 		return (EINVAL);
 	}
 
-	return (sys_lseek(l, &sys_lseek_args, retval));
+	error = sys_lseek(l, &sys_lseek_args, retval);
+	return (error == ENOTCAPABLE ? ESPIPE : error);
 }
 
 /* Converts a file descriptor to a CloudABI file descriptor type. */
@@ -277,23 +328,40 @@ cloudabi_convert_filetype(const struct file *fp)
 
 }
 
+/*
+ * Converts NetBSD's Capsicum rights to CloudABI's set of rights.
+ */
+static cloudabi_rights_t
+convert_netbsd_rights(cap_rights_t rights)
+{
+	cloudabi_rights_t ret = 0;
+
+#define MAPPING(cloudabi, netbsd) do {			\
+	if ((rights & (netbsd)) == (netbsd))		\
+		ret |= (cloudabi);			\
+} while (0);
+	RIGHT_MAPPINGS
+#undef MAPPING
+	return ret;
+}
+
 int
 cloudabi_sys_fd_stat_get(struct lwp *l,
     const struct cloudabi_sys_fd_stat_get_args *uap, register_t *retval)
 {
-	cloudabi_fdstat_t fsb = {
-		.fs_rights_base		= ~0,
-		.fs_rights_inheriting	= ~0,
-	};
+	cloudabi_fdstat_t fsb;
 	file_t *fp;
+	cap_rights_t base, inheriting;
 	int error, oflags;
 
+	memset(&fsb, '\0', sizeof(fsb));
 	error = fd_getfile(SCARG(uap, fd), 0, &fp);
 	if (error != 0)
 		return (error);
 	oflags = OFLAGS(fp->f_flag);
-	fd_putfile(SCARG(uap, fd));
 	fsb.fs_filetype = cloudabi_convert_filetype(fp);
+	fd_getrights(SCARG(uap, fd), &base, &inheriting);
+	fd_putfile(SCARG(uap, fd));
 
 	/* Convert file descriptor flags. */
 	if (oflags & O_APPEND)
@@ -307,7 +375,8 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 	if (oflags & O_SYNC)
 		fsb.fs_flags |= CLOUDABI_FDFLAG_SYNC;
 
-	/* TODO(ed): Return the rights. */
+	fsb.fs_rights_base = convert_netbsd_rights(base);
+	fsb.fs_rights_inheriting = convert_netbsd_rights(inheriting);
 	return (copyout(&fsb, SCARG(uap, buf), sizeof(fsb)));
 }
 
@@ -352,7 +421,9 @@ cloudabi_sys_fd_sync(struct lwp *l, const struct cloudabi_sys_fd_sync_args *uap,
     register_t *retval)
 {
 	struct sys_fsync_args sys_fsync_args;
+	int error;
 
 	SCARG(&sys_fsync_args, fd) = SCARG(uap, fd);
-	return (sys_fsync(l, &sys_fsync_args, retval));
+	error = sys_fsync(l, &sys_fsync_args, retval);
+	return (error == ENOTCAPABLE ? EINVAL : error);
 }

@@ -128,7 +128,7 @@ sys_ktrace(struct lwp *l, const struct sys_ktrace_args *uap, register_t *retval)
 		 * tracing process for the duration of this syscall.
 		 * This is not expected to be a problem.
 		 */
-		if ((error = fd_allocfile(&fp, &fd)) != 0) {
+		if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0) {
 			vn_close(vp, FWRITE, l->l_cred);
 			ktrexit(l);
 			return error;

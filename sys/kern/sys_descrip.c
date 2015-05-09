@@ -113,7 +113,7 @@ sys_dup(struct lwp *l, const struct sys_dup_args *uap, register_t *retval)
 	error = fd_getfile(oldfd, 0, &fp);
 	if (error != 0)
 		return (error);
-	error = fd_dup(fp, 0, &newfd, false);
+	error = fd_dup(oldfd, 0, &newfd, false);
 	fd_putfile(oldfd);
 	*retval = newfd;
 	return error;
@@ -142,7 +142,7 @@ dodup(struct lwp *l, int from, int to, int flags, register_t *retval)
 	else if (from == to)
 		error = 0;
 	else
-		error = fd_dup2(fp, to, flags);
+		error = fd_dup2(from, to, flags);
 	closef(fp);
 	*retval = to;
 
@@ -380,6 +380,9 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 	case F_SETFD:
 		rights = 0;
 		break;
+	case F_SETFL:
+		rights = CAP_FCNTL_SETFL;
+		break;
 	default:
 		rights = CAP_OTHER;
 		break;
@@ -406,7 +409,7 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 			fd_putfile(fd);
 			return EINVAL;
 		}
-		error = fd_dup(fp, newmin, &i, cloexec);
+		error = fd_dup(fd, newmin, &i, cloexec);
 		*retval = i;
 		break;
 
@@ -779,7 +782,7 @@ sys___posix_fadvise50(struct lwp *l,
 int
 sys_pipe(struct lwp *l, const void *v, register_t *retval)
 {
-	return pipe1(l, retval, 0);
+	return pipe1(l, retval, 0, CAP_ALL_MASK, CAP_ALL_MASK);
 }
 
 int
@@ -791,7 +794,8 @@ sys_pipe2(struct lwp *l, const struct sys_pipe2_args *uap, register_t *retval)
 	} */
 	int fd[2], error;
 
-	if ((error = pipe1(l, retval, SCARG(uap, flags))) != 0)
+	if ((error = pipe1(l, retval, SCARG(uap, flags), CAP_ALL_MASK,
+	    CAP_ALL_MASK)) != 0)
 		return error;
 	fd[0] = retval[0];
 	fd[1] = retval[1];

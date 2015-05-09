@@ -244,7 +244,8 @@ pipe_dtor(void *arg, void *obj)
  * The pipe system call for the DTYPE_PIPE type of pipes
  */
 int
-pipe1(struct lwp *l, register_t *retval, int flags)
+pipe1(struct lwp *l, register_t *retval, int flags, cap_rights_t rights1,
+    cap_rights_t rights2)
 {
 	struct pipe *rpipe, *wpipe;
 	file_t *rf, *wf;
@@ -263,12 +264,12 @@ pipe1(struct lwp *l, register_t *retval, int flags)
 	wpipe->pipe_lock = rpipe->pipe_lock;
 	mutex_obj_hold(wpipe->pipe_lock);
 
-	error = fd_allocfile(&rf, &fd);
+	error = fd_allocfile(&rf, rights1, &fd);
 	if (error)
 		goto free2;
 	retval[0] = fd;
 
-	error = fd_allocfile(&wf, &fd);
+	error = fd_allocfile(&wf, rights2, &fd);
 	if (error)
 		goto free3;
 	retval[1] = fd;

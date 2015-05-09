@@ -80,7 +80,7 @@ rump_consdev_init(void)
 	KASSERT(fd_getfile(2) == NULL);
 	
 	/* then, map a file descriptor to the device */
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		panic("cons fd_allocfile failed: %d", error);
 
 	fp->f_flag = FWRITE;

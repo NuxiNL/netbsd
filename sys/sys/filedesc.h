@@ -72,47 +72,64 @@
 #define	CAP_BINDAT		_CAP_BIT(2)
 #define	CAP_CONNECT		_CAP_BIT(3)
 #define	CAP_CONNECTAT		_CAP_BIT(4)
-#define	CAP_EVENT		_CAP_BIT(5)
-#define	CAP_FDATASYNC		_CAP_BIT(6)
-#define	CAP_FSTAT		_CAP_BIT(7)
-#define	CAP_FSTATAT		_CAP_BIT(8)
-#define	CAP_FSYNC		_CAP_BIT(9)
-#define	CAP_FTRUNCATE		_CAP_BIT(10)
-#define	CAP_FUTIMES		_CAP_BIT(11)
-#define	CAP_FUTIMESAT		_CAP_BIT(12)
-#define	CAP_GETDENTS		_CAP_BIT(13)
-#define	CAP_GETPEERNAME		_CAP_BIT(14)
-#define	CAP_GETSOCKNAME		_CAP_BIT(15)
-#define	CAP_GETSOCKOPT		_CAP_BIT(16)
-#define	CAP_JUST_MMAP_X		_CAP_BIT(17)
-#define	CAP_JUST_SEEK		_CAP_BIT(18)
-#define	CAP_KQUEUE_CHANGE	_CAP_BIT(19)
-#define	CAP_KQUEUE_EVENT	_CAP_BIT(20)
-#define	CAP_LINKAT_DEST		_CAP_BIT(21)
-#define	CAP_LINKAT_SRC		_CAP_BIT(22)
-#define	CAP_LISTEN		_CAP_BIT(23)
-#define	CAP_MKDIRAT		_CAP_BIT(24)
-#define	CAP_MKFIFOAT		_CAP_BIT(25)
-#define	CAP_MMAP		_CAP_BIT(26)
-#define	CAP_POSIX_FADVISE	_CAP_BIT(27)
-#define	CAP_POSIX_FALLOCATE	_CAP_BIT(28)
-#define	CAP_READ		_CAP_BIT(29)
-#define	CAP_READLINKAT		_CAP_BIT(30)
-#define	CAP_RENAMEAT_DEST	_CAP_BIT(31)
-#define	CAP_RENAMEAT_SRC	_CAP_BIT(32)
-#define	CAP_SEEK_TELL		_CAP_BIT(33)
-#define	CAP_SHUTDOWN		_CAP_BIT(34)
-#define	CAP_SYMLINKAT		_CAP_BIT(35)
-#define	CAP_UNLINKAT		_CAP_BIT(36)
-#define	CAP_WRITE		_CAP_BIT(37)
+#define	CAP_CREATE		_CAP_BIT(5)
+#define	CAP_EVENT		_CAP_BIT(6)
+#define	CAP_FCNTL_SETFL		_CAP_BIT(7)
+#define	CAP_FDATASYNC		_CAP_BIT(8)
+#define	CAP_FEXECVE		_CAP_BIT(9)
+#define	CAP_FSTAT		_CAP_BIT(10)
+#define	CAP_FSTATAT		_CAP_BIT(11)
+#define	CAP_FSYNC		_CAP_BIT(12)
+#define	CAP_FTRUNCATE		_CAP_BIT(13)
+#define	CAP_FUTIMES		_CAP_BIT(14)
+#define	CAP_FUTIMESAT		_CAP_BIT(15)
+#define	CAP_GETDENTS		_CAP_BIT(16)
+#define	CAP_GETPEERNAME		_CAP_BIT(17)
+#define	CAP_GETSOCKNAME		_CAP_BIT(18)
+#define	CAP_GETSOCKOPT		_CAP_BIT(19)
+#define	CAP_JUST_MMAP_X		_CAP_BIT(20)
+#define	CAP_JUST_SEEK		_CAP_BIT(21)
+#define	CAP_KQUEUE_CHANGE	_CAP_BIT(22)
+#define	CAP_KQUEUE_EVENT	_CAP_BIT(23)
+#define	CAP_LINKAT_SOURCE	_CAP_BIT(24)
+#define	CAP_LINKAT_TARGET	_CAP_BIT(25)
+#define	CAP_LISTEN		_CAP_BIT(26)
+#define	CAP_LOOKUP		_CAP_BIT(27)
+#define	CAP_MKDIRAT		_CAP_BIT(28)
+#define	CAP_MKFIFOAT		_CAP_BIT(29)
+#define	CAP_MMAP		_CAP_BIT(30)
+#define	CAP_PDWAIT		_CAP_BIT(31)
+#define	CAP_POSIX_FADVISE	_CAP_BIT(32)
+#define	CAP_POSIX_FALLOCATE	_CAP_BIT(33)
+#define	CAP_READ		_CAP_BIT(34)
+#define	CAP_READLINKAT		_CAP_BIT(35)
+#define	CAP_RENAMEAT_SOURCE	_CAP_BIT(36)
+#define	CAP_RENAMEAT_TARGET	_CAP_BIT(37)
+#define	CAP_SEEK_TELL		_CAP_BIT(38)
+#define	CAP_SHUTDOWN		_CAP_BIT(39)
+#define	CAP_SYMLINKAT		_CAP_BIT(40)
+#define	CAP_UNLINKAT		_CAP_BIT(41)
+#define	CAP_WRITE		_CAP_BIT(42)
 #define	CAP_OTHER		_CAP_BIT(63)
 
+#define	CAP_KQUEUE		(CAP_KQUEUE_CHANGE | CAP_KQUEUE_EVENT)
 #define	CAP_MMAP_R		(CAP_MMAP | CAP_JUST_SEEK | CAP_READ)
 #define	CAP_MMAP_W		(CAP_MMAP | CAP_JUST_SEEK | CAP_WRITE)
 #define	CAP_MMAP_X		(CAP_MMAP | CAP_JUST_SEEK | CAP_JUST_MMAP_X)
 #define	CAP_PREAD		(CAP_READ | CAP_JUST_SEEK)
 #define	CAP_PWRITE		(CAP_WRITE | CAP_JUST_SEEK)
+#define	CAP_RECV		CAP_READ
 #define	CAP_SEEK		(CAP_JUST_SEEK | CAP_SEEK_TELL)
+#define	CAP_SEND		CAP_WRITE
+
+#define	CAP_SOCK_CLIENT \
+	(CAP_CONNECT | CAP_GETPEERNAME | CAP_GETSOCKNAME | CAP_GETSOCKOPT | \
+	 CAP_RECV | CAP_SEND | CAP_SHUTDOWN)
+#define	CAP_SOCK_SERVER \
+	(CAP_ACCEPT | CAP_BIND | CAP_GETPEERNAME | CAP_GETSOCKNAME | \
+	 CAP_GETSOCKOPT | CAP_LISTEN | CAP_RECV | CAP_SEND | CAP_SHUTDOWN)
+
+#define	CAP_ALL_MASK		(~(uint64_t)0)
 
 typedef uint64_t cap_rights_t;
 
@@ -160,6 +177,7 @@ typedef struct fdfile {
 	struct file	*ff_file;	/* d: pointer to file if open */
 	SLIST_HEAD(,knote) ff_knlist;	/* d: knotes attached to this fd */
 	kcondvar_t	ff_closing;	/* d: notifier for close */
+	cap_rights_t	ff_rights_base;	/* d: descriptor base rights */
 } fdfile_t;
 
 /* Reference count */
@@ -233,9 +251,9 @@ struct proc;
 void	fd_sys_init(void);
 int	fd_open(const char*, int, int, int*);
 int	fd_dupopen(int, int *, int, int);
-int	fd_alloc(struct proc *, int, int *);
+int	fd_alloc(struct proc *, int, cap_rights_t, int *);
 void	fd_tryexpand(struct proc *);
-int	fd_allocfile(file_t **, int *);
+int	fd_allocfile(file_t **, cap_rights_t, int *);
 void	fd_affix(struct proc *, file_t *, unsigned);
 void	fd_abort(struct proc *, file_t *, unsigned);
 filedesc_t *fd_copy(void);
@@ -252,14 +270,16 @@ void	fd_putfile(unsigned);
 int	fd_getvnode(unsigned, cap_rights_t, file_t **);
 int	fd_getsock(unsigned, cap_rights_t, struct socket **);
 int	fd_getsock1(unsigned, cap_rights_t, struct socket **, file_t **);
+void	fd_getrights(unsigned, cap_rights_t *, cap_rights_t *);
 void	fd_putvnode(unsigned);
 void	fd_putsock(unsigned);
 int	fd_close(unsigned);
-int	fd_dup(file_t *, int, int *, bool);
-int	fd_dup2(file_t *, unsigned, int);
+int	fd_dup(int, int, int *, bool);
+int	fd_dup2(int, unsigned, int);
 int	fd_clone(file_t *, unsigned, int, const struct fileops *, void *);
 void	fd_set_exclose(struct lwp *, int, bool);
-int	pipe1(struct lwp *, register_t *, int);
+int	kqueue1(struct lwp *, register_t *, int, cap_rights_t);
+int	pipe1(struct lwp *, register_t *, int, cap_rights_t, cap_rights_t);
 int	dodup(struct lwp *, int, int, int, register_t *);
 
 void	cwd_sys_init(void);

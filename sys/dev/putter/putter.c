@@ -547,7 +547,7 @@ puttercdopen(dev_t dev, int flags, int fmt, struct lwp *l)
 	selinit(&pi->pi_sel);
 	mutex_exit(&pi_mtx);
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		goto bad1;
 
 	if ((error = putter_configure(dev, flags, fmt, fd)) != 0)

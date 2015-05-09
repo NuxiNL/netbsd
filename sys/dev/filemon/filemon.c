@@ -214,7 +214,7 @@ filemon_open(dev_t dev, int oflags __unused, int mode __unused,
 	int error, fd;
 
 	/* falloc() will use the descriptor for us. */
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		return error;
 
 	filemon = kmem_alloc(sizeof(struct filemon), KM_SLEEP);

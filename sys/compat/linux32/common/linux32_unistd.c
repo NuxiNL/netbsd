@@ -251,7 +251,7 @@ linux32_sys_pipe(struct lwp *l, const struct linux32_sys_pipe_args *uap,
     register_t *retval)
 {
 	int error;
-	if ((error = pipe1(l, retval, 0)))
+	if ((error = pipe1(l, retval, 0, CAP_ALL_MASK, CAP_ALL_MASK)))
 		return error;
 	return linux32_pipe(l, SCARG_P32(uap, fd), retval);
 }
@@ -266,7 +266,7 @@ linux32_sys_pipe2(struct lwp *l, const struct linux32_sys_pipe2_args *uap,
 	if ((flags & ~(O_CLOEXEC|O_NONBLOCK)) != 0)
 		return EINVAL;
 
-	if ((error = pipe1(l, retval, flags)))
+	if ((error = pipe1(l, retval, flags, CAP_ALL_MASK, CAP_ALL_MASK)))
 		return error;
 
 	return linux32_pipe(l, SCARG_P32(uap, fd), retval);

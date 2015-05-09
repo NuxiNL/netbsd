@@ -1057,7 +1057,7 @@ vchiq_open(dev_t dev, int flags, int mode, lwp_t *l)
 		if (!instance)
 			return -ENOMEM;
 
-		err = fd_allocfile(&fp, &fd);
+		err = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
 		if (err) {
 			kfree(instance);
 			return -err;

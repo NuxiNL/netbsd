@@ -756,7 +756,7 @@ tap_dev_cloner(struct lwp *l)
 	file_t *fp;
 	int error, fd;
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		return (error);
 
 	if ((sc = tap_clone_creator(-1)) == NULL) {

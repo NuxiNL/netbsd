@@ -280,7 +280,8 @@ fork1(struct lwp *l1, int flags, int exitsig, void *stack, size_t stacksize,
 	 * Allocate the file descriptor needed for the process descriptor.
 	 */
 	if ((flags & FORK_PROCDESC) != 0) {
-		error = fd_allocfile(&fp_procdesc, &fd_procdesc);
+		error = fd_allocfile(&fp_procdesc, CAP_FSTAT | CAP_PDWAIT,
+		    &fd_procdesc);
 		if (error != 0) {
 			(void)chgproccnt(uid, -1);
 			atomic_dec_uint(&nprocs);

@@ -520,7 +520,7 @@ sys_mq_open(struct lwp *l, const struct sys_mq_open_args *uap,
 	}
 
 	/* Allocate file structure and descriptor. */
-	error = fd_allocfile(&fp, &mqd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, &mqd);
 	if (error) {
 		kmem_free(name, MQ_NAMELEN);
 		return error;

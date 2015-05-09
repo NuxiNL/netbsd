@@ -249,7 +249,7 @@ cryptof_ioctl(struct file *fp, u_long cmd, void *data)
 
 	switch (cmd) {
         case CRIOGET:   /* XXX deprecated, remove after 5.0 */
-		if ((error = fd_allocfile(&criofp, &criofd)) != 0)
+		if ((error = fd_allocfile(&criofp, CAP_ALL_MASK, &criofd)) != 0)
 			return error;
 		criofcr = pool_get(&fcrpl, PR_WAITOK);
 		mutex_enter(&crypto_mtx);
@@ -1067,7 +1067,7 @@ cryptoopen(dev_t dev, int flag, int mode,
 	if (crypto_usercrypto == 0)
 		return ENXIO;
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		return error;
 
 	fcr = pool_get(&fcrpl, PR_WAITOK);

@@ -2693,7 +2693,7 @@ netbsd32_pipe2(struct lwp *l, const struct netbsd32_pipe2_args *uap,
 	} */
 	int fd[2], error;
 
-	error = pipe1(l, retval, SCARG(uap, flags));
+	error = pipe1(l, retval, SCARG(uap, flags), CAP_ALL_MASK, CAP_ALL_MASK);
 	if (error != 0)
 		return error;
 

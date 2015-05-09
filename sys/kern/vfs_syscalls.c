@@ -1565,7 +1565,7 @@ do_open(lwp_t *l, struct vnode *dvp, struct pathbuf *pb, int open_flags,
 	if ((flags & (FREAD | FWRITE)) == 0)
 		return EINVAL;
 
-	if ((error = fd_allocfile(&fp, &indx)) != 0) {
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &indx)) != 0) {
 		return error;
 	}
 
@@ -1651,7 +1651,7 @@ do_sys_openat(lwp_t *l, int fdat, const char *path, int flags,
 	if (fdat != AT_FDCWD) {
 		/* fd_getvnode() will use the descriptor for us */
 		/* TODO(ed): Use the proper rights! */
-		if ((error = fd_getvnode(fdat, CAP_OTHER, &dfp)) != 0)
+		if ((error = fd_getvnode(fdat, CAP_LOOKUP, &dfp)) != 0)
 			goto out;
 
 		dvp = dfp->f_vnode;
@@ -1976,7 +1976,7 @@ dofhopen(struct lwp *l, const void *ufhp, size_t fhsize, int oflags,
 		return (EINVAL);
 	if ((flags & O_CREAT))
 		return (EINVAL);
-	if ((error = fd_allocfile(&nfp, &indx)) != 0)
+	if ((error = fd_allocfile(&nfp, CAP_ALL_MASK, &indx)) != 0)
 		return (error);
 	fp = nfp;
 	error = vfs_copyinfh_alloc(ufhp, fhsize, &fh);
@@ -2383,7 +2383,7 @@ do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
 	else
 		ns_flags = NSM_NOFOLLOW_TRYEMULROOT;
 
-	error = fd_nameiat_simple_user(l, fdpath, CAP_LINKAT_SRC, path,
+	error = fd_nameiat_simple_user(l, fdpath, CAP_LINKAT_SOURCE, path,
 	    ns_flags, &vp);
 	if (error != 0)
 		return (error);
@@ -2392,7 +2392,7 @@ do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
 		goto out1;
 	}
 	NDINIT(&nd, CREATE, LOCKPARENT | TRYEMULROOT, linkpb);
-	if ((error = fd_nameiat(l, fdlink, CAP_LINKAT_DEST, &nd)) != 0)
+	if ((error = fd_nameiat(l, fdlink, CAP_LINKAT_TARGET, &nd)) != 0)
 		goto out2;
 	if (nd.ni_vp) {
 		error = EEXIST;
@@ -4206,7 +4206,7 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	 * insane, so for the time being we need to leave it like this.
 	 */
 	NDINIT(&fnd, DELETE, (LOCKPARENT | TRYEMULROOT | INRENAME), fpb);
-	if ((error = fd_nameiat(l, fromfd, CAP_RENAMEAT_SRC, &fnd)) != 0)
+	if ((error = fd_nameiat(l, fromfd, CAP_RENAMEAT_SOURCE, &fnd)) != 0)
 		goto out2;
 
 	/*
@@ -4261,7 +4261,7 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	    (LOCKPARENT | NOCACHE | TRYEMULROOT | INRENAME |
 		((fvp->v_type == VDIR)? CREATEDIR : 0)),
 	    tpb);
-	if ((error = fd_nameiat(l, tofd, CAP_RENAMEAT_DEST, &tnd)) != 0)
+	if ((error = fd_nameiat(l, tofd, CAP_RENAMEAT_TARGET, &tnd)) != 0)
 		goto abort0;
 
 	/*

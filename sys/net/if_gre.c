@@ -1027,9 +1027,8 @@ static bool
 gre_fp_recv(struct gre_softc *sc)
 {
 	int fd, ofd, rc;
-	file_t *fp, *tfp;
+	file_t *tfp;
 
-	fp = sc->sc_fp;
 	ofd = sc->sc_fd;
 	fd = -1;
 
@@ -1039,7 +1038,7 @@ gre_fp_recv(struct gre_softc *sc)
 		return false;
 	case GRE_M_SETFP:
 		mutex_exit(&sc->sc_mtx);
-		rc = fd_dup(fp, 0, &fd, 0);
+		rc = fd_dup(ofd, 0, &fd, 0);
 		mutex_enter(&sc->sc_mtx);
 		if (rc != 0) {
 			sc->sc_msg = GRE_M_ERR;
@@ -1048,7 +1047,7 @@ gre_fp_recv(struct gre_softc *sc)
 		/*FALLTHROUGH*/
 	case GRE_M_DELFP:
 		mutex_exit(&sc->sc_mtx);
-		if (ofd != -1 && fd_getfile(ofd, CAP_OTHER, &tfp) == 0)
+		if (ofd != -1 && fd_getfile(ofd, 0, &tfp) == 0)
 			fd_close(ofd);
 		mutex_enter(&sc->sc_mtx);
 		sc->sc_fd = fd;
@@ -1378,7 +1377,7 @@ gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 		if (cmd != GRESSOCK) {
 			GRE_DPRINTF(sc, "\n");
 			/* XXX v. dodgy */
-			if (fd_getfile(fd, CAP_OTHER, &tfp) == 0)
+			if (fd_getfile(fd, 0, &tfp) == 0)
 				fd_close(fd);
 		}
 

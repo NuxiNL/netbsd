@@ -197,7 +197,7 @@ svr4_netopen(dev_t dev, int flag, int mode, struct lwp *l)
 		return EOPNOTSUPP;
 	}
 
-	if ((error = fd_allocfile(&fp, &fd)) != 0)
+	if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &fd)) != 0)
 		return error;
 
 	if ((error = socreate(family, &so, type, protocol, l, NULL)) != 0) {

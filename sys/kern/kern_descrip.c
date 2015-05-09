@@ -285,7 +285,7 @@ fd_last_set(filedesc_t *fd, int last)
 }
 
 static inline void
-fd_used(filedesc_t *fdp, unsigned fd)
+fd_used(filedesc_t *fdp, unsigned fd, cap_rights_t rights_base)
 {
 	u_int off = fd >> NDENTRYSHIFT;
 	fdfile_t *ff;
@@ -298,6 +298,7 @@ fd_used(filedesc_t *fdp, unsigned fd)
 	KASSERT(ff->ff_file == NULL);
 	KASSERT(!ff->ff_allocated);
 
+	ff->ff_rights_base = rights_base;
 	ff->ff_allocated = true;
 	fdp->fd_lomap[off] |= 1 << (fd & NDENTRYMASK);
 	if (__predict_false(fdp->fd_lomap[off] == ~0)) {
@@ -380,7 +381,9 @@ fd_getfile(unsigned fd, cap_rights_t rights, file_t **retval)
 		return (EBADF);
 	}
 
-	/* TODO(ed): Validate rights. */
+	/* Deny access if rights of the descriptor are insufficient. */
+	if (__predict_false((ff->ff_rights_base & rights) != rights))
+		return (ENOTCAPABLE);
 
 	/* Now get a reference to the descriptor. */
 	if (fdp->fd_refcnt == 1) {
@@ -413,6 +416,22 @@ fd_getfile(unsigned fd, cap_rights_t rights, file_t **retval)
 	}
 	fd_putfile(fd);
 	return (EBADF);
+}
+
+/*
+ * Fetches the rights from a file descriptor.
+ */
+void
+fd_getrights(unsigned fd, cap_rights_t *base, cap_rights_t *inheriting)
+{
+	filedesc_t *fdp;
+	fdfile_t *ff;
+
+	fdp = curlwp->l_fd;
+	ff = fdp->fd_dt->dt_ff[fd];
+	*base = ff->ff_rights_base;
+	/* TODO(ed): Implement. */
+	*inheriting = CAP_ALL_MASK;
 }
 
 /*
@@ -728,20 +747,27 @@ fd_close(unsigned fd)
  * Duplicate a file descriptor.
  */
 int
-fd_dup(file_t *fp, int minfd, int *newp, bool exclose)
+fd_dup(int oldfd, int minfd, int *newp, bool exclose)
 {
-	proc_t *p = curproc;
+	struct lwp *l;
+	proc_t *p;
+	fdfile_t *off;
+	fdtab_t *dt;
 	int error;
 
-	while ((error = fd_alloc(p, minfd, newp)) != 0) {
+	l = curlwp;
+	p = l->l_proc;
+	dt = l->l_fd->fd_dt;
+	off = dt->dt_ff[oldfd];
+	while ((error = fd_alloc(p, minfd, off->ff_rights_base, newp)) != 0) {
 		if (error != ENOSPC) {
 			return error;
 		}
 		fd_tryexpand(p);
 	}
 
-	curlwp->l_fd->fd_dt->dt_ff[*newp]->ff_exclose = exclose;
-	fd_affix(p, fp, *newp);
+	dt->dt_ff[*newp]->ff_exclose = exclose;
+	fd_affix(p, off->ff_file, *newp);
 	return 0;
 }
 
@@ -749,12 +775,12 @@ fd_dup(file_t *fp, int minfd, int *newp, bool exclose)
  * dup2 operation.
  */
 int
-fd_dup2(file_t *fp, unsigned newfd, int flags)
+fd_dup2(int oldfd, unsigned newfd, int flags)
 {
 	filedesc_t *fdp = curlwp->l_fd;
-	fdfile_t *ff;
+	fdfile_t *ff, *off;
 	fdtab_t *dt;
-	file_t *tfp;
+	file_t *fp;
 
 	if (flags & ~(O_CLOEXEC|O_NONBLOCK))
 		return EINVAL;
@@ -775,7 +801,7 @@ fd_dup2(file_t *fp, unsigned newfd, int flags)
 	mutex_enter(&fdp->fd_lock);
 	while (fd_isused(fdp, newfd)) {
 		mutex_exit(&fdp->fd_lock);
-		if (fd_getfile(newfd, 0, &tfp) == 0) {
+		if (fd_getfile(newfd, 0, &fp) == 0) {
 			(void)fd_close(newfd);
 		} else {
 			/*
@@ -793,10 +819,12 @@ fd_dup2(file_t *fp, unsigned newfd, int flags)
 		dt->dt_ff[newfd] = ff;
 		ff = NULL;
 	}
-	fd_used(fdp, newfd);
+	off = fdp->fd_dt->dt_ff[oldfd];
+	fd_used(fdp, newfd, off->ff_rights_base);
 	mutex_exit(&fdp->fd_lock);
 
 	dt->dt_ff[newfd]->ff_exclose = (flags & O_CLOEXEC) != 0;
+	fp = off->ff_file;
 	fp->f_flag |= flags & FNONBLOCK;
 	/* Slot is now allocated.  Insert copy of the file. */
 	fd_affix(curproc, fp, newfd);
@@ -852,7 +880,7 @@ closef(file_t *fp)
  * Allocate a file descriptor for the process.
  */
 int
-fd_alloc(proc_t *p, int want, int *result)
+fd_alloc(proc_t *p, int want, cap_rights_t rights_base, int *result)
 {
 	filedesc_t *fdp = p->p_fd;
 	int i, lim, last, error, hi;
@@ -898,7 +926,7 @@ fd_alloc(proc_t *p, int want, int *result)
 			dt->dt_ff[i] = pool_cache_get(fdfile_cache, PR_WAITOK);
 		}
 		KASSERT(dt->dt_ff[i]->ff_file == NULL);
-		fd_used(fdp, i);
+		fd_used(fdp, i, rights_base);
 		if (want <= fdp->fd_freefile) {
 			fdp->fd_freefile = i;
 		}
@@ -1088,14 +1116,14 @@ fd_tryexpand(proc_t *p)
  * for the current process.
  */
 int
-fd_allocfile(file_t **resultfp, int *resultfd)
+fd_allocfile(file_t **resultfp, cap_rights_t rights_base, int *resultfd)
 {
 	proc_t *p = curproc;
 	kauth_cred_t cred;
 	file_t *fp;
 	int error;
 
-	while ((error = fd_alloc(p, 0, resultfd)) != 0) {
+	while ((error = fd_alloc(p, 0, rights_base, resultfd)) != 0) {
 		if (error != ENOSPC) {
 			return error;
 		}
@@ -1496,6 +1524,7 @@ fd_copy(void)
 		}
 		ff2->ff_file = fp;
 		ff2->ff_exclose = ff->ff_exclose;
+		ff2->ff_rights_base = ff->ff_rights_base;
 		ff2->ff_allocated = true;
 
 		/* Fix up bitmaps. */
@@ -1690,12 +1719,12 @@ fd_dupopen(int old, int *newp, int mode, int error)
 		}
 
 		/* Copy it. */
-		error = fd_dup(fp, 0, newp, ff->ff_exclose);
+		error = fd_dup(old, 0, newp, ff->ff_exclose);
 		break;
 
 	case EMOVEFD:
 		/* Copy it. */
-		error = fd_dup(fp, 0, newp, ff->ff_exclose);
+		error = fd_dup(old, 0, newp, ff->ff_exclose);
 		if (error != 0) {
 			break;
 		}

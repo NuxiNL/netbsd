@@ -220,7 +220,8 @@ check_shell:
 
 		KASSERT(!(epp->ep_flags & EXEC_HASFD));
 
-		if ((error = fd_allocfile(&fp, &epp->ep_fd)) != 0) {
+		if ((error = fd_allocfile(&fp, CAP_ALL_MASK, &epp->ep_fd)) !=
+		    0) {
 			scriptvp = NULL;
 			shellargp = NULL;
 			goto fail;

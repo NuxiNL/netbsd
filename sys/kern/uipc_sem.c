@@ -360,7 +360,7 @@ do_ksem_init(lwp_t *l, u_int val, intptr_t *idp, copyout_t docopyout)
 	intptr_t id;
 	int fd, error;
 
-	error = fd_allocfile(&fp, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
 	if (error) {
 		return error;
 	}
@@ -417,7 +417,7 @@ do_ksem_open(struct lwp *l, const char *semname, int oflag, mode_t mode,
 	if (error) {
 		return error;
 	}
-	error = fd_allocfile(&fp, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, &fd);
 	if (error) {
 		return error;
 	}
