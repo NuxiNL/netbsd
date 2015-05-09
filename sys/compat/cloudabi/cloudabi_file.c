@@ -324,6 +324,8 @@ cloudabi_sys_file_open(struct lwp *l,
 	file_t *dfp, *fp;
 	struct pathbuf *pb;
 	struct proc *p = l->l_proc;
+	cap_rights_t fd_base, fd_inheriting, rights_base, rights_inheriting,
+	    rights_needed;
 	int error, fd, fflags;
 
 	/* Copy in initial file descriptor properties. */
@@ -355,6 +357,22 @@ cloudabi_sys_file_open(struct lwp *l,
 	if ((SCARG(uap, fd) & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) == 0)
 		fflags |= O_NOFOLLOW;
 
+	/* Convert rights. */
+	error = cloudabi_convert_cloudabi_rights(fds.fs_rights_base,
+	    &rights_base);
+	if (error != 0)
+		return (error);
+	error = cloudabi_convert_cloudabi_rights(fds.fs_rights_inheriting,
+	    &rights_inheriting);
+	if (error != 0)
+		return (error);
+
+	/* Figure out which inheriting rights on the descriptor are needed. */
+	/* TODO(ed): Make this more complete! */
+	rights_needed = rights_base | rights_inheriting;
+	if ((fflags & O_TRUNC) != 0)
+		rights_needed |= CAP_FTRUNCATE;
+
 	/* Roughly convert rights to open() access mode. */
 	if ((fds.fs_rights_base &
 	    (CLOUDABI_RIGHT_FD_READ | CLOUDABI_RIGHT_FILE_READDIR)) != 0 &&
@@ -378,17 +396,23 @@ cloudabi_sys_file_open(struct lwp *l,
 		return (error);
 
 	/* Obtain the directory from where to do the lookup. */
-	/* TODO(ed): Use the proper rights! */
-	error = fd_getvnode(SCARG(uap, fd), CAP_LOOKUP, &dfp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    CAP_LOOKUP | ((fflags & O_CREAT) != 0 ? CAP_CREATE : 0), &dfp);
 	if (error != 0) {
 		if (error == EINVAL)
 			error = ENOTDIR;
 		goto out1;
 	}
 
+	/* Ensure that we're not extending the rights. */
+	fd_getrights(SCARG(uap, fd), &fd_base, &fd_inheriting);
+	if ((rights_needed & fd_inheriting) != rights_needed) {
+		error = ENOTCAPABLE;
+		goto out2;
+	}
+
 	/* Allocate a new file descriptor. */
-	/* TODO(ed): Use proper rights. */
-	error = fd_allocfile(&fp, CAP_ALL_MASK, CAP_ALL_MASK, &fd);
+	error = fd_allocfile(&fp, rights_base, rights_inheriting, &fd);
 	if (error != 0)
 		goto out2;
 
@@ -402,6 +426,7 @@ cloudabi_sys_file_open(struct lwp *l,
 	}
 
 	/* Initialize the new file descriptor. */
+	/* TODO(ed): Remove rights that don't apply to the descriptor. */
 	fp->f_flag = fflags & FMASK;
 	fp->f_type = DTYPE_VNODE;
 	fp->f_ops = &vnops;

@@ -334,9 +334,7 @@ cloudabi_convert_filetype(const struct file *fp)
 
 }
 
-/*
- * Converts NetBSD's Capsicum rights to CloudABI's set of rights.
- */
+/* Converts NetBSD's Capsicum rights to CloudABI's set of rights. */
 static cloudabi_rights_t
 convert_netbsd_rights(cap_rights_t rights)
 {
@@ -384,6 +382,24 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 	fsb.fs_rights_base = convert_netbsd_rights(base);
 	fsb.fs_rights_inheriting = convert_netbsd_rights(inheriting);
 	return (copyout(&fsb, SCARG(uap, buf), sizeof(fsb)));
+}
+
+int
+cloudabi_convert_cloudabi_rights(cloudabi_rights_t in, cap_rights_t *out)
+{
+
+	*out = 0;
+#define MAPPING(cloudabi, netbsd) do {			\
+	if (in & (cloudabi)) {				\
+		*out |= (netbsd);			\
+		in &= ~(cloudabi);			\
+	}						\
+} while (0);
+	RIGHT_MAPPINGS
+#undef MAPPING
+	if (in != 0)
+		return (ENOTCAPABLE);
+	return (0);
 }
 
 int

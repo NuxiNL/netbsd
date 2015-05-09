@@ -62,6 +62,9 @@ cloudabi_errno_t cloudabi_convert_errno(int);
 /* Converts a file descriptor to a CloudABI file descriptor type. */
 cloudabi_filetype_t cloudabi_convert_filetype(const struct file *);
 
+/* Converts CloudABI's Capsicum rights to NetBSD's set of rights. */
+int cloudabi_convert_cloudabi_rights(cloudabi_rights_t, cap_rights_t *);
+
 /* Generates a unique thread ID for a given thread. */
 cloudabi_tid_t cloudabi_gettid(struct lwp *);
 
