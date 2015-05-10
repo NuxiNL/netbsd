@@ -407,6 +407,8 @@ cloudabi_sys_fd_stat_put(struct lwp *l,
     const struct cloudabi_sys_fd_stat_put_args *uap, register_t *retval)
 {
 	cloudabi_fdstat_t fsb;
+	cap_rights_t rights_base, rights_inheriting;
+	file_t *fp;
 	int error;
 
 	error = copyin(SCARG(uap, buf), &fsb, sizeof(fsb));
@@ -432,8 +434,24 @@ cloudabi_sys_fd_stat_put(struct lwp *l,
 
 		return (sys_fcntl(l, &sys_fcntl_args, retval));
 	} else if (SCARG(uap, flags) == CLOUDABI_FDSTAT_RIGHTS) {
-		/* TODO(ed): Implement. */
-		return (ENOSYS);
+		/* Convert rights. */
+		error = cloudabi_convert_cloudabi_rights(
+		    fsb.fs_rights_base, &rights_base);
+		if (error != 0)
+			return (error);
+		error = cloudabi_convert_cloudabi_rights(
+		    fsb.fs_rights_inheriting, &rights_inheriting);
+		if (error != 0)
+			return (error);
+
+		/* Apply rights. */
+		error = fd_getfile(SCARG(uap, fd), 0, &fp);
+		if (error != 0)
+			return (error);
+		error = fd_setrights(SCARG(uap, fd), rights_base,
+		    rights_inheriting);
+		fd_putfile(SCARG(uap, fd));
+		return (error);
 	}
 	return (EINVAL);
 }

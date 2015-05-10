@@ -436,6 +436,26 @@ fd_getrights(unsigned fd, cap_rights_t *base, cap_rights_t *inheriting)
 }
 
 /*
+ * Applies new rights to a file descriptor.
+ */
+int
+fd_setrights(unsigned fd, cap_rights_t base, cap_rights_t inheriting)
+{
+	filedesc_t *fdp;
+	fdfile_t *ff;
+
+	fdp = curlwp->l_fd;
+	ff = fdp->fd_dt->dt_ff[fd];
+	/* TODO(ed): Locking? */
+	if ((base & ff->ff_rights_base) != base ||
+	    (inheriting & ff->ff_rights_inheriting) != inheriting)
+		return (ENOTCAPABLE);
+	ff->ff_rights_base = base;
+	ff->ff_rights_inheriting = inheriting;
+	return (0);
+}
+
+/*
  * Release a reference to a file descriptor acquired with fd_getfile().
  */
 void

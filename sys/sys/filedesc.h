@@ -272,6 +272,7 @@ int	fd_getvnode(unsigned, cap_rights_t, file_t **);
 int	fd_getsock(unsigned, cap_rights_t, struct socket **);
 int	fd_getsock1(unsigned, cap_rights_t, struct socket **, file_t **);
 void	fd_getrights(unsigned, cap_rights_t *, cap_rights_t *);
+int	fd_setrights(unsigned, cap_rights_t, cap_rights_t);
 void	fd_putvnode(unsigned);
 void	fd_putsock(unsigned);
 int	fd_close(unsigned);
