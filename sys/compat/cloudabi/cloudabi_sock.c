@@ -367,7 +367,7 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
 		so->so_error = 0;
 
 	/* Set ss_state. */
-	if ((so->so_options & SO_ACCEPTCONN) == 0)
+	if ((so->so_options & SO_ACCEPTCONN) != 0)
 		ss.ss_state |= CLOUDABI_SOCKSTAT_ACCEPTCONN;
 
 	sounlock(so);
