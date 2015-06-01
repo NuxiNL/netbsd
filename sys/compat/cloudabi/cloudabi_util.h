@@ -38,6 +38,9 @@ struct mbuf;
 struct nameidata;
 struct vnode;
 
+/* Assertions. */
+#define	cloudabi_assert(expr, reason)	KASSERT(expr)
+
 /* Mode for new files created by CloudABI processed. */
 #define CLOUDABI_MODE(l)	(0777 & ~(l)->l_proc->p_cwdi->cwdi_cmask)
 /* Calls NDINIT() with SANDBOXINDIR set. */

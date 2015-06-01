@@ -192,6 +192,9 @@ static LIST_HEAD(, futex_lock) futex_lock_list =
 static LIST_HEAD(, futex_condvar) futex_condvar_list =
     LIST_HEAD_INITIALIZER(&futex_condvar_list);
 
+/* Portability. */
+typedef struct lwp *thread_t;
+
 /* Utility functions. */
 static void futex_lock_assert(const struct futex_lock *);
 static struct futex_lock *futex_lock_lookup_locked(struct futex_address *);
@@ -205,24 +208,26 @@ static void futex_queue_init(struct futex_queue *);
 static void futex_queue_requeue(struct futex_queue *, struct futex_queue *,
     unsigned int);
 static int futex_queue_sleep(struct futex_queue *, struct futex_lock *,
-    struct futex_waiter *, struct lwp *, cloudabi_clockid_t,
-    cloudabi_timestamp_t, cloudabi_timestamp_t);
+    struct futex_waiter *, thread_t, cloudabi_clockid_t, cloudabi_timestamp_t,
+    cloudabi_timestamp_t);
 static cloudabi_tid_t futex_queue_tid_best(const struct futex_queue *);
 static void futex_queue_wake_up_all(struct futex_queue *);
 static void futex_queue_wake_up_best(struct futex_queue *);
 static void futex_queue_wake_up_donate(struct futex_queue *, unsigned int);
+static int futex_user_load(uint32_t *, uint32_t *);
+static int futex_user_store(uint32_t *, uint32_t);
+static int futex_user_cmpxchg(uint32_t *, uint32_t, uint32_t *, uint32_t);
 
 static int cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *,
-    struct futex_waiter *, struct lwp *, cloudabi_condvar_t *,
-    cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
+    struct futex_waiter *, thread_t, cloudabi_condvar_t *, cloudabi_clockid_t,
+    cloudabi_timestamp_t, cloudabi_timestamp_t);
 
 /*
  * futex_address operations.
  */
 
 static int
-futex_address_create(struct futex_address *fa, struct lwp *l,
-    const void *object)
+futex_address_create(struct futex_address *fa, thread_t td, const void *object)
 {
 	struct vm_amap *va;
 	struct uvm_object *vo;
@@ -230,7 +235,7 @@ futex_address_create(struct futex_address *fa, struct lwp *l,
 	struct vm_map *map;
 	struct vm_map_entry *entry;
 
-	vs = l->l_proc->p_vmspace;
+	vs = td->l_proc->p_vmspace;
 	map = &vs->vm_map;
 
 	vm_map_lock(map);
@@ -238,7 +243,7 @@ futex_address_create(struct futex_address *fa, struct lwp *l,
 		vm_map_unlock(map);
 		return (EFAULT);
 	}
-	KASSERT(!UVM_ET_ISSUBMAP(entry));
+	cloudabi_assert(!UVM_ET_ISSUBMAP(entry), "Mapping cannot be a submap");
 
 	if (entry->inheritance != MAP_INHERIT_SHARE) {
 		/* Address corresponds with process-local mapping. */
@@ -300,19 +305,20 @@ static void
 futex_condvar_assert(const struct futex_condvar *fc)
 {
 
-	KASSERT(fc->fc_waitcount >= futex_queue_count(&fc->fc_waiters));
+	cloudabi_assert(fc->fc_waitcount >= futex_queue_count(&fc->fc_waiters),
+	    ("Total number of waiters cannot be smaller than the wait queue"));
 	futex_lock_assert(fc->fc_lock);
 }
 
 static int
-futex_condvar_lookup(struct lwp *l, const cloudabi_condvar_t *address,
+futex_condvar_lookup(thread_t td, const cloudabi_condvar_t *address,
     struct futex_condvar **fcret)
 {
 	struct futex_address fa_condvar;
 	struct futex_condvar *fc;
 	int error;
 
-	error = futex_address_create(&fa_condvar, l, address);
+	error = futex_address_create(&fa_condvar, td, address);
 	if (error != 0)
 		return (error);
 
@@ -332,19 +338,18 @@ futex_condvar_lookup(struct lwp *l, const cloudabi_condvar_t *address,
 }
 
 static int
-futex_condvar_lookup_or_create(struct lwp *l,
-    const cloudabi_condvar_t *condvar, const cloudabi_lock_t *lock,
-    struct futex_condvar **fcret)
+futex_condvar_lookup_or_create(thread_t td, const cloudabi_condvar_t *condvar,
+    const cloudabi_lock_t *lock, struct futex_condvar **fcret)
 {
 	struct futex_address fa_condvar, fa_lock;
 	struct futex_condvar *fc;
 	struct futex_lock *fl;
 	int error;
 
-	error = futex_address_create(&fa_condvar, l, condvar);
+	error = futex_address_create(&fa_condvar, td, condvar);
 	if (error != 0)
 		return (error);
-	error = futex_address_create(&fa_lock, l, lock);
+	error = futex_address_create(&fa_lock, td, lock);
 	if (error != 0) {
 		futex_address_free(&fa_condvar);
 		return (error);
@@ -403,10 +408,9 @@ futex_condvar_unmanage(struct futex_condvar *fc,
     cloudabi_condvar_t *condvar)
 {
 
-	if (futex_queue_count(&fc->fc_waiters) == 0 &&
-	    suword32(condvar, CLOUDABI_CONDVAR_HAS_NO_WAITERS) != 0)
-		return (EFAULT);
-	return (0);
+	if (futex_queue_count(&fc->fc_waiters) != 0)
+		return (0);
+	return futex_user_store(condvar, CLOUDABI_CONDVAR_HAS_NO_WAITERS);
 }
 
 /*
@@ -422,20 +426,22 @@ futex_lock_assert(const struct futex_lock *fl)
 	 * Vice versa: if a futex lock has waiters, it must be
 	 * kernel-managed.
 	 */
-	KASSERT((fl->fl_owner == LOCK_UNMANAGED) ==
+	cloudabi_assert((fl->fl_owner == LOCK_UNMANAGED) ==
 	    (futex_queue_count(&fl->fl_readers) == 0 &&
-	    futex_queue_count(&fl->fl_writers) == 0));
-	KASSERT(fl->fl_waitcount != 0 || fl->fl_owner == LOCK_UNMANAGED);
+	    futex_queue_count(&fl->fl_writers) == 0),
+	    ("Managed locks must have waiting threads"));
+	cloudabi_assert(fl->fl_waitcount != 0 || fl->fl_owner == LOCK_UNMANAGED,
+	    ("Lock with no waiters must be unmanaged"));
 }
 
 static int
-futex_lock_lookup(struct lwp *l, const cloudabi_lock_t *address,
+futex_lock_lookup(thread_t td, const cloudabi_lock_t *address,
     struct futex_lock **flret)
 {
 	struct futex_address fa;
 	int error;
 
-	error = futex_address_create(&fa, l, address);
+	error = futex_address_create(&fa, td, address);
 	if (error != 0)
 		return (error);
 
@@ -470,9 +476,9 @@ futex_lock_lookup_locked(struct futex_address *fa)
 }
 
 static int
-futex_lock_rdlock(struct futex_lock *fl, struct lwp *l,
-    cloudabi_lock_t *lock, cloudabi_clockid_t clock_id,
-    cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
+futex_lock_rdlock(struct futex_lock *fl, thread_t td, cloudabi_lock_t *lock,
+    cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
+    cloudabi_timestamp_t precision)
 {
 	struct futex_waiter fw;
 	int error;
@@ -480,11 +486,14 @@ futex_lock_rdlock(struct futex_lock *fl, struct lwp *l,
 	error = futex_lock_tryrdlock(fl, lock);
 	if (error == EBUSY) {
 		/* Suspend execution. */
-		KASSERT(fl->fl_owner != LOCK_UNMANAGED);
-		error = futex_queue_sleep(&fl->fl_readers, fl, &fw, l,
+		cloudabi_assert(fl->fl_owner != LOCK_UNMANAGED,
+		    ("Attempted to sleep on an unmanaged lock"));
+		error = futex_queue_sleep(&fl->fl_readers, fl, &fw, td,
 		    clock_id, timeout, precision);
-		KASSERT((error == 0) == fw.fw_locked);
-		KASSERT(futex_queue_count(&fw.fw_donated) == 0);
+		cloudabi_assert((error == 0) == fw.fw_locked,
+		    ("Should have locked write lock on success"));
+		cloudabi_assert(futex_queue_count(&fw.fw_donated) == 0,
+		    ("Lock functions cannot receive threads"));
 	}
 	if (error != 0)
 		futex_lock_unmanage(fl, lock);
@@ -498,7 +507,8 @@ futex_lock_release(struct futex_lock *fl)
 	futex_lock_assert(fl);
 	if (fl->fl_waitcount == 0) {
 		/* Lock object is unreferenced. Deallocate it. */
-		KASSERT(fl->fl_owner == LOCK_UNMANAGED);
+		cloudabi_assert(fl->fl_owner == LOCK_UNMANAGED,
+		    ("Attempted to free a managed lock"));
 		futex_address_free(&fl->fl_address);
 		LIST_REMOVE(fl, fl_next);
 		free(fl, M_FUTEX);
@@ -510,6 +520,7 @@ static int
 futex_lock_unmanage(struct futex_lock *fl, cloudabi_lock_t *lock)
 {
 	cloudabi_lock_t cmp, old;
+	int error;
 
 	if (futex_queue_count(&fl->fl_readers) == 0 &&
 	    futex_queue_count(&fl->fl_writers) == 0) {
@@ -517,13 +528,15 @@ futex_lock_unmanage(struct futex_lock *fl, cloudabi_lock_t *lock)
 		fl->fl_owner = LOCK_UNMANAGED;
 
 		/* Clear kernel-managed bit. */
-		if (fueword32(lock, &old) != 0)
-			return (EFAULT);
+		error = futex_user_load(lock, &old);
+		if (error != 0)
+			return (error);
 		for (;;) {
 			cmp = old;
-			if (ucas_32(lock, cmp,
-			    cmp & ~CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
-				return (EFAULT);
+			error = futex_user_cmpxchg(lock, cmp, &old,
+			    cmp & ~CLOUDABI_LOCK_KERNEL_MANAGED);
+			if (error != 0)
+				return (error);
 			if (old == cmp)
 				break;
 		}
@@ -552,8 +565,7 @@ futex_lock_set_owner(struct futex_lock *fl, cloudabi_lock_t lock)
 }
 
 static int
-futex_lock_unlock(struct futex_lock *fl, struct lwp *l,
-    cloudabi_lock_t *lock)
+futex_lock_unlock(struct futex_lock *fl, thread_t td, cloudabi_lock_t *lock)
 {
 	int error;
 
@@ -562,7 +574,7 @@ futex_lock_unlock(struct futex_lock *fl, struct lwp *l,
 	if (error != 0)
 		return (error);
 	if (fl->fl_owner != LOCK_UNMANAGED &&
-	    fl->fl_owner != cloudabi_gettid(l))
+	    fl->fl_owner != cloudabi_gettid(td))
 		return (EPERM);
 	return (futex_lock_wake_up_next(fl, lock));
 }
@@ -572,10 +584,12 @@ static int
 futex_lock_update_owner(struct futex_lock *fl, cloudabi_lock_t *address)
 {
 	cloudabi_lock_t lock;
+	int error;
 
 	if (fl->fl_owner == LOCK_OWNER_UNKNOWN) {
-		if (fueword32(address, &lock) != 0)
-			return (EFAULT);
+		error = futex_user_load(address, &lock);
+		if (error != 0)
+			return (error);
 		futex_lock_set_owner(fl, lock);
 	}
 	return (0);
@@ -585,6 +599,7 @@ static int
 futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 {
 	cloudabi_lock_t old, cmp;
+	int error;
 
 	if (fl->fl_owner != LOCK_UNMANAGED) {
 		/* Lock is already acquired. */
@@ -607,8 +622,9 @@ futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 			 * it by increasing the read count.
 			 */
 			cmp = old;
-			if (ucas_32(address, cmp, cmp + 1, &old) != 0)
-				return (EFAULT);
+			error = futex_user_cmpxchg(address, cmp, &old, cmp + 1);
+			if (error != 0)
+				return (error);
 			if (old == cmp) {
 				/* Success. */
 				return (0);
@@ -616,9 +632,10 @@ futex_lock_tryrdlock(struct futex_lock *fl, cloudabi_lock_t *address)
 		} else {
 			/* Lock is read-locked. Make it kernel-managed. */
 			cmp = old;
-			if (ucas_32(address, cmp,
-			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
-				return (EFAULT);
+			error = futex_user_cmpxchg(address, cmp, &old,
+			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED);
+			if (error != 0)
+				return (error);
 			if (old == cmp) {
 				/* Success. */
 				futex_lock_set_owner(fl, cmp);
@@ -633,6 +650,7 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
     cloudabi_tid_t tid, bool force_kernel_managed)
 {
 	cloudabi_lock_t old, new, cmp;
+	int error;
 
 	if (fl->fl_owner == tid) {
 		/* Attempted to acquire lock recursively. */
@@ -662,9 +680,10 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
 			new = tid | CLOUDABI_LOCK_WRLOCKED;
 			if (force_kernel_managed)
 				new |= CLOUDABI_LOCK_KERNEL_MANAGED;
-			if (ucas_32(address, CLOUDABI_LOCK_UNLOCKED, new,
-			    &old) != 0)
-				return (EFAULT);
+			error = futex_user_cmpxchg(address,
+			    CLOUDABI_LOCK_UNLOCKED, &old, new);
+			if (error != 0)
+				return (error);
 			if (old == CLOUDABI_LOCK_UNLOCKED) {
 				/* Success. */
 				if (force_kernel_managed)
@@ -674,9 +693,10 @@ futex_lock_trywrlock(struct futex_lock *fl, cloudabi_lock_t *address,
 		} else {
 			/* Lock is still locked. Make it kernel-managed. */
 			cmp = old;
-			if (ucas_32(address, cmp,
-			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED, &old) != 0)
-				return (EFAULT);
+			error = futex_user_cmpxchg(address, cmp, &old,
+			    cmp | CLOUDABI_LOCK_KERNEL_MANAGED);
+			if (error != 0)
+				return (error);
 			if (old == cmp) {
 				/* Success. */
 				futex_lock_set_owner(fl, cmp);
@@ -690,6 +710,7 @@ static int
 futex_lock_wake_up_next(struct futex_lock *fl, cloudabi_lock_t *lock)
 {
 	cloudabi_tid_t tid;
+	int error;
 
 	/*
 	 * Determine which thread(s) to wake up. Prefer waking up
@@ -701,27 +722,31 @@ futex_lock_wake_up_next(struct futex_lock *fl, cloudabi_lock_t *lock)
 		    futex_queue_count(&fl->fl_readers) > 0) {
 			/* Lock should remain managed afterwards. */
 			tid = futex_queue_tid_best(&fl->fl_writers);
-			if (suword32(lock,
+			error = futex_user_store(lock,
 			    tid | CLOUDABI_LOCK_WRLOCKED |
-			    CLOUDABI_LOCK_KERNEL_MANAGED) != 0)
-				return (EFAULT);
+			    CLOUDABI_LOCK_KERNEL_MANAGED);
+			if (error != 0)
+				return (error);
 
 			futex_queue_wake_up_best(&fl->fl_writers);
 			fl->fl_owner = tid;
 		} else {
 			/* Lock can become unmanaged afterwards. */
-			if (suword32(lock,
+			error = futex_user_store(lock,
 			    futex_queue_tid_best(&fl->fl_writers) |
-			    CLOUDABI_LOCK_WRLOCKED) != 0)
-				return (EFAULT);
+			    CLOUDABI_LOCK_WRLOCKED);
+			if (error != 0)
+				return (error);
 
 			futex_queue_wake_up_best(&fl->fl_writers);
 			fl->fl_owner = LOCK_UNMANAGED;
 		}
 	} else {
 		/* Transfer ownership to all read-lockers (if any). */
-		if (suword32(lock, futex_queue_count(&fl->fl_readers)) != 0)
-			return (EFAULT);
+		error = futex_user_store(lock,
+		    futex_queue_count(&fl->fl_readers));
+		if (error != 0)
+			return (error);
 
 		/* Wake up all threads. */
 		futex_queue_wake_up_all(&fl->fl_readers);
@@ -731,21 +756,21 @@ futex_lock_wake_up_next(struct futex_lock *fl, cloudabi_lock_t *lock)
 }
 
 static int
-futex_lock_wrlock(struct futex_lock *fl, struct lwp *l,
-    cloudabi_lock_t *lock, cloudabi_clockid_t clock_id,
-    cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision,
-    struct futex_queue *donated)
+futex_lock_wrlock(struct futex_lock *fl, thread_t td, cloudabi_lock_t *lock,
+    cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
+    cloudabi_timestamp_t precision, struct futex_queue *donated)
 {
 	struct futex_waiter fw;
 	int error;
 
-	error = futex_lock_trywrlock(fl, lock, cloudabi_gettid(l),
+	error = futex_lock_trywrlock(fl, lock, cloudabi_gettid(td),
 	    futex_queue_count(donated) > 0);
 
 	if (error == 0 || error == EBUSY) {
 		/* Put donated threads in queue before suspending. */
-		KASSERT(futex_queue_count(donated) == 0 ||
-		    fl->fl_owner != LOCK_UNMANAGED);
+		cloudabi_assert(futex_queue_count(donated) == 0 ||
+		    fl->fl_owner != LOCK_UNMANAGED,
+		    ("Lock should be managed if we are going to donate"));
 		futex_queue_requeue(donated, &fl->fl_writers, UINT_MAX);
 	} else {
 		/*
@@ -757,11 +782,14 @@ futex_lock_wrlock(struct futex_lock *fl, struct lwp *l,
 
 	if (error == EBUSY) {
 		/* Suspend execution if the lock was busy. */
-		KASSERT(fl->fl_owner != LOCK_UNMANAGED);
-		error = futex_queue_sleep(&fl->fl_writers, fl, &fw, l,
+		cloudabi_assert(fl->fl_owner != LOCK_UNMANAGED,
+		    ("Attempted to sleep on an unmanaged lock"));
+		error = futex_queue_sleep(&fl->fl_writers, fl, &fw, td,
 		    clock_id, timeout, precision);
-		KASSERT((error == 0) == fw.fw_locked);
-		KASSERT(futex_queue_count(&fw.fw_donated) == 0);
+		cloudabi_assert((error == 0) == fw.fw_locked,
+		    ("Should have locked write lock on success"));
+		cloudabi_assert(futex_queue_count(&fw.fw_donated) == 0,
+		    ("Lock functions cannot receive threads"));
 	}
 	if (error != 0)
 		futex_lock_unmanage(fl, lock);
@@ -796,7 +824,7 @@ futex_queue_init(struct futex_queue *fq)
 
 static int
 futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
-    struct futex_waiter *fw, struct lwp *l, cloudabi_clockid_t clock_id,
+    struct futex_waiter *fw, thread_t td, cloudabi_clockid_t clock_id,
     cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
 	struct timeval tv;
@@ -804,7 +832,7 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	int error, ticks;
 
 	/* Initialize futex_waiter object. */
-	fw->fw_tid = cloudabi_gettid(l);
+	fw->fw_tid = cloudabi_gettid(td);
 	fw->fw_locked = false;
 	futex_queue_init(&fw->fw_donated);
 
@@ -820,7 +848,7 @@ futex_queue_sleep(struct futex_queue *fq, struct futex_lock *fl,
 	futex_lock_assert(fl);
 	do {
 		/* Fetch current time. */
-		error = cloudabi_clock_time_get(l, clock_id, &now);
+		error = cloudabi_clock_time_get(td, clock_id, &now);
 		if (error != 0)
 			break;
 		if (now >= timeout) {
@@ -945,11 +973,36 @@ futex_queue_wake_up_donate(struct futex_queue *fq, unsigned int nwaiters)
 }
 
 /*
+ * futex_user operations. Used to adjust values in userspace.
+ */
+
+static int
+futex_user_load(uint32_t *obj, uint32_t *val)
+{
+
+	return (fueword32(obj, val) != 0 ? EFAULT : 0);
+}
+
+static int
+futex_user_store(uint32_t *obj, uint32_t val)
+{
+
+	return (suword32(obj, val) != 0 ? EFAULT : 0);
+}
+
+static int
+futex_user_cmpxchg(uint32_t *obj, uint32_t cmp, uint32_t *old, uint32_t new)
+{
+
+	return (ucas_32(obj, cmp, new, old) != 0 ? EFAULT : 0);
+}
+
+/*
  * Blocking calls: acquiring locks, waiting on condition variables.
  */
 
 int
-cloudabi_futex_condvar_wait(struct lwp *l, cloudabi_condvar_t *condvar,
+cloudabi_futex_condvar_wait(thread_t td, cloudabi_condvar_t *condvar,
     cloudabi_lock_t *lock, cloudabi_clockid_t clock_id,
     cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
@@ -959,24 +1012,25 @@ cloudabi_futex_condvar_wait(struct lwp *l, cloudabi_condvar_t *condvar,
 	int error, error2;
 
 	/* Lookup condition variable object. */
-	error = futex_condvar_lookup_or_create(l, condvar, lock, &fc);
+	error = futex_condvar_lookup_or_create(td, condvar, lock, &fc);
 	if (error != 0)
 		return (error);
 	fl = fc->fc_lock;
 
 	/* Drop the lock. */
-	error = futex_lock_unlock(fl, l, lock);
+	error = futex_lock_unlock(fl, td, lock);
 	if (error != 0) {
 		futex_condvar_release(fc);
 		return (error);
 	}
 
 	++fc->fc_waitcount;
-	error = cloudabi_futex_condvar_wait_unlocked(fc, &fw, l, condvar,
+	error = cloudabi_futex_condvar_wait_unlocked(fc, &fw, td, condvar,
 	    clock_id, timeout, precision);
 	if (fw.fw_locked) {
 		/* Waited and got the lock assigned to us. */
-		KASSERT(futex_queue_count(&fw.fw_donated) == 0);
+		cloudabi_assert(futex_queue_count(&fw.fw_donated) == 0,
+		    ("Received threads while being locked"));
 	} else if (error == 0 || error == ETIMEDOUT) {
 		if (error != 0)
 			futex_condvar_unmanage(fc, condvar);
@@ -990,12 +1044,13 @@ cloudabi_futex_condvar_wait(struct lwp *l, cloudabi_condvar_t *condvar,
 		 *    thread that gets woken up. This thread is
 		 *    responsible for reacquiring the userspace lock.
 		 */
-		error2 = futex_lock_wrlock(fl, l, lock,
+		error2 = futex_lock_wrlock(fl, td, lock,
 		    CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0, &fw.fw_donated);
 		if (error2 != 0)
 			error = error2;
 	} else {
-		KASSERT(futex_queue_count(&fw.fw_donated) == 0);
+		cloudabi_assert(futex_queue_count(&fw.fw_donated) == 0,
+		    ("Received threads on error"));
 		futex_condvar_unmanage(fc, condvar);
 		futex_lock_unmanage(fl, lock);
 	}
@@ -1006,7 +1061,7 @@ cloudabi_futex_condvar_wait(struct lwp *l, cloudabi_condvar_t *condvar,
 
 static int
 cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *fc,
-    struct futex_waiter *fw, struct lwp *l, cloudabi_condvar_t *condvar,
+    struct futex_waiter *fw, thread_t td, cloudabi_condvar_t *condvar,
     cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
     cloudabi_timestamp_t precision)
 {
@@ -1016,20 +1071,21 @@ cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *fc,
 	futex_queue_init(&fw->fw_donated);
 
 	/*
-	 * Clear CLOUDABI_CONDVAR_HAS_NO_WAITERS to make userspace
-	 * threads call into the kernel to perform wakeups.
+	 * Set the condition variable to something other than
+	 * CLOUDABI_CONDVAR_HAS_NO_WAITERS to make userspace threads
+	 * call into the kernel to perform wakeups.
 	 */
-	_Static_assert(CLOUDABI_CONDVAR_HAS_NO_WAITERS != 1, "Value mismatch");
-	if (suword32(condvar, 1) != 0)
-		return (EFAULT);
+	error = futex_user_store(condvar, ~CLOUDABI_CONDVAR_HAS_NO_WAITERS);
+	if (error != 0)
+		return (error);
 
-	error = futex_queue_sleep(&fc->fc_waiters, fc->fc_lock, fw, l,
+	error = futex_queue_sleep(&fc->fc_waiters, fc->fc_lock, fw, td,
 	    clock_id, timeout, precision);
 	return (error);
 }
 
 int
-cloudabi_futex_lock_rdlock(struct lwp *l, cloudabi_lock_t *lock,
+cloudabi_futex_lock_rdlock(thread_t td, cloudabi_lock_t *lock,
     cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
     cloudabi_timestamp_t precision)
 {
@@ -1037,18 +1093,18 @@ cloudabi_futex_lock_rdlock(struct lwp *l, cloudabi_lock_t *lock,
 	int error;
 
 	/* Look up lock object. */
-	error = futex_lock_lookup(l, lock, &fl);
+	error = futex_lock_lookup(td, lock, &fl);
 	if (error != 0)
 		return (error);
 
-	error = futex_lock_rdlock(fl, l, lock, clock_id, timeout,
+	error = futex_lock_rdlock(fl, td, lock, clock_id, timeout,
 	    precision);
 	futex_lock_release(fl);
 	return (error);
 }
 
 int
-cloudabi_futex_lock_wrlock(struct lwp *l, cloudabi_lock_t *lock,
+cloudabi_futex_lock_wrlock(thread_t td, cloudabi_lock_t *lock,
     cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
     cloudabi_timestamp_t precision)
 {
@@ -1057,12 +1113,12 @@ cloudabi_futex_lock_wrlock(struct lwp *l, cloudabi_lock_t *lock,
 	int error;
 
 	/* Look up lock object. */
-	error = futex_lock_lookup(l, lock, &fl);
+	error = futex_lock_lookup(td, lock, &fl);
 	if (error != 0)
 		return (error);
 
 	futex_queue_init(&fq);
-	error = futex_lock_wrlock(fl, l, lock, clock_id, timeout,
+	error = futex_lock_wrlock(fl, td, lock, clock_id, timeout,
 	    precision, &fq);
 	futex_lock_release(fl);
 	return (error);
@@ -1073,7 +1129,7 @@ cloudabi_futex_lock_wrlock(struct lwp *l, cloudabi_lock_t *lock,
  */
 
 int
-cloudabi_sys_condvar_signal(struct lwp *l,
+cloudabi_sys_condvar_signal(thread_t td,
     const struct cloudabi_sys_condvar_signal_args *uap, register_t *retval)
 {
 	struct futex_condvar *fc;
@@ -1088,7 +1144,7 @@ cloudabi_sys_condvar_signal(struct lwp *l,
 	}
 
 	/* Look up futex object. */
-	error = futex_condvar_lookup(l, SCARG(uap, condvar), &fc);
+	error = futex_condvar_lookup(td, SCARG(uap, condvar), &fc);
 	if (error != 0) {
 		/* Race condition: condition variable with no waiters. */
 		if (error == ENOENT)
@@ -1132,16 +1188,16 @@ cloudabi_sys_condvar_signal(struct lwp *l,
 }
 
 int
-cloudabi_sys_lock_unlock(struct lwp *l,
+cloudabi_sys_lock_unlock(thread_t td,
     const struct cloudabi_sys_lock_unlock_args *uap, register_t *retval)
 {
 	struct futex_lock *fl;
 	int error;
 
-	error = futex_lock_lookup(l, SCARG(uap, lock), &fl);
+	error = futex_lock_lookup(td, SCARG(uap, lock), &fl);
 	if (error != 0)
 		return (error);
-	error = futex_lock_unlock(fl, l, SCARG(uap, lock));
+	error = futex_lock_unlock(fl, td, SCARG(uap, lock));
 	futex_lock_release(fl);
 	return (error);
 }
