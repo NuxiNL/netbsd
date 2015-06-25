@@ -156,7 +156,7 @@
 
 39	STD	{ cloudabi64_size_t|cloudabi64_sys||poll( \
 		    cloudabi_fd_t fd, \
-		    const cloudabi64_event_t *in, \
+		    const cloudabi64_subscription_t *in, \
 		    cloudabi64_size_t nin, \
 		    cloudabi64_event_t *out, \
 		    cloudabi64_size_t nout); }

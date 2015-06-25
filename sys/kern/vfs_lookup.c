@@ -689,7 +689,7 @@ namei_start(struct namei_state *state, int isnfsd,
 
 	/* Absolute paths are not permitted when sandboxed. */
 	if (cnp->cn_flags & SANDBOXINDIR && ndp->ni_pnbuf[0] == '/')
-		return (ENOTCAPABLE);
+		return (EPERM);
 
 	/* length includes null terminator (was originally from copyinstr) */
 	ndp->ni_pathlen = strlen(ndp->ni_pnbuf) + 1;
@@ -812,7 +812,7 @@ namei_follow(struct namei_state *state, int inhibitmagic,
 
 	/* Absolute paths are not permitted when sandboxed. */
 	if (cnp->cn_flags & SANDBOXINDIR && ndp->ni_pnbuf[0] == '/')
-		return (ENOTCAPABLE);
+		return (EPERM);
 
 	/* we're now starting from the beginning of the buffer again */
 	cnp->cn_nameptr = ndp->ni_pnbuf;
@@ -976,7 +976,7 @@ lookup_once(struct namei_state *state,
 				*foundobj_ret = foundobj;
 				/* ".." outside of the current directory. */
 				error = cnp->cn_flags & SANDBOXINDIR ?
-				    ENOTCAPABLE : 0;
+				    EPERM : 0;
 				goto done;
 			}
 			if (ndp->ni_rootdir != rootvnode) {

@@ -306,7 +306,7 @@ check_syscall_args(cloudabi_sys_mem_unmap)
 
 struct cloudabi64_sys_poll_args {
 	syscallarg(cloudabi_fd_t) fd;
-	syscallarg(const cloudabi64_event_t *) in;
+	syscallarg(const cloudabi64_subscription_t *) in;
 	syscallarg(cloudabi64_size_t) nin;
 	syscallarg(cloudabi64_event_t *) out;
 	syscallarg(cloudabi64_size_t) nout;

@@ -129,7 +129,7 @@
 /* syscall: "mem_unmap" ret: "void" args: "void *" "size_t" */
 #define	CLOUDABI64_SYS_mem_unmap	38
 
-/* syscall: "poll" ret: "cloudabi64_size_t" args: "cloudabi_fd_t" "const cloudabi64_event_t *" "cloudabi64_size_t" "cloudabi64_event_t *" "cloudabi64_size_t" */
+/* syscall: "poll" ret: "cloudabi64_size_t" args: "cloudabi_fd_t" "const cloudabi64_subscription_t *" "cloudabi64_size_t" "cloudabi64_event_t *" "cloudabi64_size_t" */
 #define	CLOUDABI64_SYS_poll	39
 
 /* syscall: "proc_exec" ret: "void" args: "cloudabi_fd_t" "const cloudabi64_ciovec_t *" "cloudabi64_size_t" "const cloudabi_fd_t *" "cloudabi64_size_t" */

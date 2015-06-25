@@ -134,14 +134,14 @@
 
 #define CLOUDABI_EVENT_FD_READWRITE_HANGUP 0x1
 
-// Filter types for cloudabi_event_t::filter.
-#define CLOUDABI_EVENT_TYPE_CLOCK 1
-#define CLOUDABI_EVENT_TYPE_CONDVAR 2
-#define CLOUDABI_EVENT_TYPE_FD_READ 3
-#define CLOUDABI_EVENT_TYPE_FD_WRITE 4
-#define CLOUDABI_EVENT_TYPE_LOCK_RDLOCK 5
-#define CLOUDABI_EVENT_TYPE_LOCK_WRLOCK 6
-#define CLOUDABI_EVENT_TYPE_PROC_TERMINATE 7
+// Filter types for cloudabi_eventtype_t.
+#define CLOUDABI_EVENTTYPE_CLOCK 1
+#define CLOUDABI_EVENTTYPE_CONDVAR 2
+#define CLOUDABI_EVENTTYPE_FD_READ 3
+#define CLOUDABI_EVENTTYPE_FD_WRITE 4
+#define CLOUDABI_EVENTTYPE_LOCK_RDLOCK 5
+#define CLOUDABI_EVENTTYPE_LOCK_WRLOCK 6
+#define CLOUDABI_EVENTTYPE_PROC_TERMINATE 7
 
 // File descriptor behavior flags.
 #define CLOUDABI_FDFLAG_APPEND 0x1
@@ -302,6 +302,14 @@
 // sockstat() state.
 #define CLOUDABI_SOCKSTAT_ACCEPTCONN 0x1
 
+// cloudabi_subscription_t flags.
+#define CLOUDABI_SUBSCRIPTION_ADD 0x1
+#define CLOUDABI_SUBSCRIPTION_CLEAR 0x2
+#define CLOUDABI_SUBSCRIPTION_DELETE 0x4
+#define CLOUDABI_SUBSCRIPTION_DISABLE 0x8
+#define CLOUDABI_SUBSCRIPTION_ENABLE 0x10
+#define CLOUDABI_SUBSCRIPTION_ONESHOT 0x20
+
 // unlinkat().
 #define CLOUDABI_UNLINK_REMOVEDIR 0x1
 
@@ -317,6 +325,7 @@ typedef uint32_t cloudabi_condvar_t;    // pthread_cond_*().
 typedef uint64_t cloudabi_device_t;     // struct stat::st_dev.
 typedef uint64_t cloudabi_dircookie_t;  // readdir().
 typedef uint16_t cloudabi_errno_t;      // errno.
+typedef uint8_t cloudabi_eventtype_t;   // poll().
 typedef uint32_t cloudabi_exitcode_t;   // _exit() and _Exit().
 typedef uint32_t cloudabi_fd_t;         // File descriptors.
 typedef uint16_t cloudabi_fdflags_t;    // cloudabi_fdstat_t.
@@ -343,6 +352,7 @@ typedef uint8_t cloudabi_signal_t;      // raise().
 typedef uint32_t cloudabi_tid_t;        // Thread ID.
 typedef uint64_t cloudabi_timestamp_t;  // clock_*(), struct stat::st_*tim.
 typedef uint8_t cloudabi_ulflags_t;     // unlinkat().
+typedef uint64_t cloudabi_userdata_t;   // User-supplied data for callbacks.
 typedef uint8_t cloudabi_whence_t;      // lseek().
 
 // Macro to force sane alignment rules.
@@ -351,7 +361,7 @@ typedef uint8_t cloudabi_whence_t;      // lseek().
 // embedded in structs, even though they are 8-byte aligned when not
 // embedded. Force 8-byte alignment explicitly.
 #define MEMBER(type) alignas(alignof(type)) type
-#define ASSERT_FIELD(type, field, offset)                     \
+#define ASSERT_OFFSET(type, field, offset)                    \
   static_assert(offsetof(cloudabi_##type, field) == (offset), \
                 "Offset incorrect")
 #define ASSERT_SIZE(type, size) \
@@ -364,10 +374,10 @@ typedef struct {
   MEMBER(uint32_t) d_namlen;  // Length of the name of the current entry.
   MEMBER(cloudabi_filetype_t) d_type;  // File type of the current entry.
 } cloudabi_dirent_t;
-ASSERT_FIELD(dirent_t, d_next, 0);
-ASSERT_FIELD(dirent_t, d_ino, 8);
-ASSERT_FIELD(dirent_t, d_namlen, 16);
-ASSERT_FIELD(dirent_t, d_type, 20);
+ASSERT_OFFSET(dirent_t, d_next, 0);
+ASSERT_OFFSET(dirent_t, d_ino, 8);
+ASSERT_OFFSET(dirent_t, d_namlen, 16);
+ASSERT_OFFSET(dirent_t, d_type, 20);
 ASSERT_SIZE(dirent_t, 24);
 
 // File descriptor status.
@@ -377,10 +387,10 @@ typedef struct {
   MEMBER(cloudabi_rights_t) fs_rights_base;        // Base rights.
   MEMBER(cloudabi_rights_t) fs_rights_inheriting;  // Inheriting rights.
 } cloudabi_fdstat_t;
-ASSERT_FIELD(fdstat_t, fs_filetype, 0);
-ASSERT_FIELD(fdstat_t, fs_flags, 2);
-ASSERT_FIELD(fdstat_t, fs_rights_base, 8);
-ASSERT_FIELD(fdstat_t, fs_rights_inheriting, 16);
+ASSERT_OFFSET(fdstat_t, fs_filetype, 0);
+ASSERT_OFFSET(fdstat_t, fs_flags, 2);
+ASSERT_OFFSET(fdstat_t, fs_rights_base, 8);
+ASSERT_OFFSET(fdstat_t, fs_rights_inheriting, 16);
 ASSERT_SIZE(fdstat_t, 24);
 
 // File status.
@@ -394,14 +404,14 @@ typedef struct {
   MEMBER(cloudabi_timestamp_t) st_mtim;     // Modification time.
   MEMBER(cloudabi_timestamp_t) st_ctim;     // Change time.
 } cloudabi_filestat_t;
-ASSERT_FIELD(filestat_t, st_dev, 0);
-ASSERT_FIELD(filestat_t, st_ino, 8);
-ASSERT_FIELD(filestat_t, st_filetype, 16);
-ASSERT_FIELD(filestat_t, st_nlink, 20);
-ASSERT_FIELD(filestat_t, st_size, 24);
-ASSERT_FIELD(filestat_t, st_atim, 32);
-ASSERT_FIELD(filestat_t, st_mtim, 40);
-ASSERT_FIELD(filestat_t, st_ctim, 48);
+ASSERT_OFFSET(filestat_t, st_dev, 0);
+ASSERT_OFFSET(filestat_t, st_ino, 8);
+ASSERT_OFFSET(filestat_t, st_filetype, 16);
+ASSERT_OFFSET(filestat_t, st_nlink, 20);
+ASSERT_OFFSET(filestat_t, st_size, 24);
+ASSERT_OFFSET(filestat_t, st_atim, 32);
+ASSERT_OFFSET(filestat_t, st_mtim, 40);
+ASSERT_OFFSET(filestat_t, st_ctim, 48);
 ASSERT_SIZE(filestat_t, 56);
 
 typedef struct {
@@ -420,11 +430,11 @@ typedef struct {
     } sa_inet6;
   };
 } cloudabi_sockaddr_t;
-ASSERT_FIELD(sockaddr_t, sa_family, 0);
-ASSERT_FIELD(sockaddr_t, sa_inet.addr, 2);
-ASSERT_FIELD(sockaddr_t, sa_inet.port, 6);
-ASSERT_FIELD(sockaddr_t, sa_inet6.addr, 2);
-ASSERT_FIELD(sockaddr_t, sa_inet6.port, 18);
+ASSERT_OFFSET(sockaddr_t, sa_family, 0);
+ASSERT_OFFSET(sockaddr_t, sa_inet.addr, 2);
+ASSERT_OFFSET(sockaddr_t, sa_inet.port, 6);
+ASSERT_OFFSET(sockaddr_t, sa_inet6.addr, 2);
+ASSERT_OFFSET(sockaddr_t, sa_inet6.port, 18);
 ASSERT_SIZE(sockaddr_t, 20);
 
 // Socket status.
@@ -434,14 +444,14 @@ typedef struct {
   MEMBER(cloudabi_errno_t) ss_error;        // Current error state.
   MEMBER(uint32_t) ss_state;                // State flags.
 } cloudabi_sockstat_t;
-ASSERT_FIELD(sockstat_t, ss_sockname, 0);
-ASSERT_FIELD(sockstat_t, ss_peername, 20);
-ASSERT_FIELD(sockstat_t, ss_error, 40);
-ASSERT_FIELD(sockstat_t, ss_state, 44);
+ASSERT_OFFSET(sockstat_t, ss_sockname, 0);
+ASSERT_OFFSET(sockstat_t, ss_peername, 20);
+ASSERT_OFFSET(sockstat_t, ss_error, 40);
+ASSERT_OFFSET(sockstat_t, ss_state, 44);
 ASSERT_SIZE(sockstat_t, 48);
 
 #undef MEMBER
-#undef ASSERT_FIELD
+#undef ASSERT_OFFSET
 #undef ASSERT_SIZE
 
 #endif

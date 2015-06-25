@@ -78,29 +78,30 @@ static int
 cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
     struct kevent *kevp, size_t index, int count)
 {
-	const cloudabi64_event_t *in = (const cloudabi64_event_t *)inp + index;
+	const cloudabi64_subscription_t *in =
+	    (const cloudabi64_subscription_t *)inp + index;
 
 	while (count-- > 0) {
-		cloudabi64_event_t ev;
+		cloudabi64_subscription_t sub;
 		int error;
 
-		error = copyin(in++, &ev, sizeof(ev));
+		error = copyin(in++, &sub, sizeof(sub));
 		if (error != 0)
 			return (error);
 
-		switch (ev.type) {
-		case CLOUDABI_EVENT_TYPE_CLOCK: {
+		switch (sub.type) {
+		case CLOUDABI_EVENTTYPE_CLOCK: {
 			cloudabi_timestamp_t ts;
 
 			/* Convert timestamp to a relative value. */
-			if (ev.clock.timeout > 0) {
+			if (sub.clock.timeout > 0) {
 				/* Non-zero timestamp. */
 				error = cloudabi_clock_time_get(curlwp,
-				    ev.clock.clock_id, &ts);
+				    sub.clock.clock_id, &ts);
 				if (error != 0)
 					return (error);
-				ts = ts > ev.clock.timeout ? 0 :
-				    ev.clock.timeout - ts;
+				ts = ts > sub.clock.timeout ? 0 :
+				    sub.clock.timeout - ts;
 				if (ts > INTPTR_MAX)
 					ts = INTPTR_MAX;
 			} else {
@@ -108,7 +109,7 @@ cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
 				ts = 0;
 			}
 			kevp->filter = EVFILT_TIMER;
-			kevp->ident = ev.clock.identifier;
+			kevp->ident = sub.clock.identifier;
 			kevp->fflags = 0;
 			kevp->data = ts / 1000000;
 			/* Prevent returning EINVAL. */
@@ -116,22 +117,22 @@ cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
 				kevp->data = 1;
 			break;
 		}
-		case CLOUDABI_EVENT_TYPE_FD_READ:
+		case CLOUDABI_EVENTTYPE_FD_READ:
 			kevp->filter = EVFILT_READ;
-			kevp->ident = ev.fd_readwrite.fd;
+			kevp->ident = sub.fd_readwrite.fd;
 			/* TODO(ed): Fix the poll() case. */
 			kevp->fflags = 0;
 			kevp->data = 0;
 			break;
-		case CLOUDABI_EVENT_TYPE_FD_WRITE:
+		case CLOUDABI_EVENTTYPE_FD_WRITE:
 			kevp->filter = EVFILT_WRITE;
-			kevp->ident = ev.fd_readwrite.fd;
+			kevp->ident = sub.fd_readwrite.fd;
 			kevp->fflags = 0;
 			kevp->data = 0;
 			break;
-		case CLOUDABI_EVENT_TYPE_PROC_TERMINATE:
+		case CLOUDABI_EVENTTYPE_PROC_TERMINATE:
 			kevp->filter = EVFILT_PROCDESC;
-			kevp->ident = ev.proc_terminate.fd;
+			kevp->ident = sub.proc_terminate.fd;
 			kevp->fflags = NOTE_EXIT;
 			kevp->data = 0;
 			break;
@@ -144,7 +145,7 @@ cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
 		}
 		/* TODO(ed): Use proper flags if not anonymous. */
 		kevp->flags = EV_ADD | EV_ONESHOT;
-		kevp->udata = ev.userdata;
+		kevp->udata = sub.userdata;
 		++kevp;
 	}
 	return (0);
@@ -164,14 +165,14 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 		memset(&ev, '\0', sizeof(ev));
 		switch (kevp->filter) {
 		case EVFILT_TIMER:
-			ev.type = CLOUDABI_EVENT_TYPE_CLOCK;
+			ev.type = CLOUDABI_EVENTTYPE_CLOCK;
 			ev.clock.identifier = kevp->ident;
 			break;
 		case EVFILT_READ:
 		case EVFILT_WRITE:
 			ev.type = kevp->filter == EVFILT_READ ?
-			    CLOUDABI_EVENT_TYPE_FD_READ :
-			    CLOUDABI_EVENT_TYPE_FD_WRITE;
+			    CLOUDABI_EVENTTYPE_FD_READ :
+			    CLOUDABI_EVENTTYPE_FD_WRITE;
 			ev.fd_readwrite.fd = kevp->ident;
 			ev.fd_readwrite.nbytes = kevp->data;
 			if ((kevp->flags & EV_EOF) != 0) {
@@ -180,7 +181,7 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 			}
 			break;
 		case EVFILT_PROCDESC:
-			ev.type = CLOUDABI_EVENT_TYPE_PROC_TERMINATE;
+			ev.type = CLOUDABI_EVENTTYPE_PROC_TERMINATE;
 			ev.proc_terminate.fd = kevp->ident;
 			if (WIFSIGNALED(kevp->data)) {
 				/* Process terminated due to a signal. */
@@ -227,50 +228,66 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 	 */
 	if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE && SCARG(uap, nin) == 1 &&
 	    SCARG(uap, nout) >= 1) {
+		cloudabi64_subscription_t sub;
 		cloudabi64_event_t ev;
-		error = copyin(SCARG(uap, in), &ev, sizeof(ev));
+
+		error = copyin(SCARG(uap, in), &sub, sizeof(sub));
 		if (error != 0)
 			return (error);
-		if (ev.type == CLOUDABI_EVENT_TYPE_CONDVAR) {
+		memset(&ev, '\0', sizeof(ev));
+		ev.userdata = sub.userdata;
+		ev.type = sub.type;
+		if (sub.type == CLOUDABI_EVENTTYPE_CONDVAR) {
 			/* Wait on a condition variable. */
+			ev.condvar.condvar = sub.condvar.condvar;
 			ev.error = cloudabi_convert_errno(
 			    cloudabi_futex_condvar_wait(
-			        l, (cloudabi_condvar_t *)ev.condvar.condvar,
-			        (cloudabi_lock_t *)ev.condvar.lock,
+			        l, (cloudabi_condvar_t *)sub.condvar.condvar,
+			        (cloudabi_lock_t *)sub.condvar.lock,
 			        CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0));
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));
-		} else if (ev.type == CLOUDABI_EVENT_TYPE_LOCK_RDLOCK) {
+		} else if (sub.type == CLOUDABI_EVENTTYPE_LOCK_RDLOCK) {
 			/* Acquire a read lock. */
+			ev.lock.lock = sub.lock.lock;
 			ev.error = cloudabi_convert_errno(
 			    cloudabi_futex_lock_rdlock(
-			        l, (cloudabi_lock_t *)ev.lock.lock,
+			        l, (cloudabi_lock_t *)sub.lock.lock,
 			        CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0));
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));
-		} else if (ev.type == CLOUDABI_EVENT_TYPE_LOCK_WRLOCK) {
+		} else if (sub.type == CLOUDABI_EVENTTYPE_LOCK_WRLOCK) {
 			/* Acquire a write lock. */
+			ev.lock.lock = sub.lock.lock;
 			ev.error = cloudabi_convert_errno(
 			    cloudabi_futex_lock_wrlock(
-			        l, (cloudabi_lock_t *)ev.lock.lock,
+			        l, (cloudabi_lock_t *)sub.lock.lock,
 			        CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0));
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));
 		}
 	} else if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE &&
 	    SCARG(uap, nin) == 2 && SCARG(uap, nout) >= 2) {
-		cloudabi64_event_t ev[2];
-		error = copyin(SCARG(uap, in), &ev, sizeof(ev));
+		cloudabi64_subscription_t sub[2];
+		cloudabi64_event_t ev[2] = {};
+
+		error = copyin(SCARG(uap, in), &sub, sizeof(sub));
 		if (error != 0)
 			return (error);
-		if (ev[0].type == CLOUDABI_EVENT_TYPE_CONDVAR &&
-		    ev[1].type == CLOUDABI_EVENT_TYPE_CLOCK) {
+		ev[0].userdata = sub[0].userdata;
+		ev[0].type = sub[0].type;
+		ev[1].userdata = sub[1].userdata;
+		ev[1].type = sub[1].type;
+		if (sub[0].type == CLOUDABI_EVENTTYPE_CONDVAR &&
+		    sub[1].type == CLOUDABI_EVENTTYPE_CLOCK) {
 			/* Wait for a condition variable with timeout. */
+			ev[0].condvar.condvar = sub[0].condvar.condvar;
+			ev[1].clock.identifier = sub[1].clock.identifier;
 			error = cloudabi_futex_condvar_wait(
-			    l, (cloudabi_condvar_t *)ev[0].condvar.condvar,
-			    (cloudabi_lock_t *)ev[0].condvar.lock,
-			    ev[1].clock.clock_id, ev[1].clock.timeout,
-			    ev[1].clock.precision);
+			    l, (cloudabi_condvar_t *)sub[0].condvar.condvar,
+			    (cloudabi_lock_t *)sub[0].condvar.lock,
+			    sub[1].clock.clock_id, sub[1].clock.timeout,
+			    sub[1].clock.precision);
 			if (error == ETIMEDOUT) {
 				ev[1].error = 0;
 				retval[0] = 1;
@@ -282,13 +299,15 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 			retval[0] = 1;
 			return (copyout(&ev[0], SCARG(uap, out),
 			    sizeof(ev[0])));
-		} else if (ev[0].type == CLOUDABI_EVENT_TYPE_LOCK_RDLOCK &&
-		    ev[1].type == CLOUDABI_EVENT_TYPE_CLOCK) {
+		} else if (sub[0].type == CLOUDABI_EVENTTYPE_LOCK_RDLOCK &&
+		    sub[1].type == CLOUDABI_EVENTTYPE_CLOCK) {
 			/* Acquire a read lock with a timeout. */
+			ev[0].lock.lock = sub[0].lock.lock;
+			ev[1].clock.identifier = sub[1].clock.identifier;
 			error = cloudabi_futex_lock_rdlock(
-			    l, (cloudabi_lock_t *)ev[0].lock.lock,
-			    ev[1].clock.clock_id, ev[1].clock.timeout,
-			    ev[1].clock.precision);
+			    l, (cloudabi_lock_t *)sub[0].lock.lock,
+			    sub[1].clock.clock_id, sub[1].clock.timeout,
+			    sub[1].clock.precision);
 			if (error == ETIMEDOUT) {
 				ev[1].error = 0;
 				retval[0] = 1;
@@ -300,13 +319,15 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 			retval[0] = 1;
 			return (copyout(&ev[0], SCARG(uap, out),
 			    sizeof(ev[0])));
-		} else if (ev[0].type == CLOUDABI_EVENT_TYPE_LOCK_WRLOCK &&
-		    ev[1].type == CLOUDABI_EVENT_TYPE_CLOCK) {
+		} else if (sub[0].type == CLOUDABI_EVENTTYPE_LOCK_WRLOCK &&
+		    sub[1].type == CLOUDABI_EVENTTYPE_CLOCK) {
 			/* Acquire a write lock with a timeout. */
+			ev[0].lock.lock = sub[0].lock.lock;
+			ev[1].clock.identifier = sub[1].clock.identifier;
 			error = cloudabi_futex_lock_wrlock(
-			    l, (cloudabi_lock_t *)ev[0].lock.lock,
-			    ev[1].clock.clock_id, ev[1].clock.timeout,
-			    ev[1].clock.precision);
+			    l, (cloudabi_lock_t *)sub[0].lock.lock,
+			    sub[1].clock.clock_id, sub[1].clock.timeout,
+			    sub[1].clock.precision);
 			if (error == ETIMEDOUT) {
 				ev[1].error = 0;
 				retval[0] = 1;
