@@ -992,7 +992,7 @@ convert_timestamp(const struct timespec *ts)
 
 /* Converts a NetBSD stat structure to a CloudABI stat structure. */
 static void
-convert_stat(struct file *fp, const struct stat *sb, cloudabi_filestat_t *csb)
+convert_stat(const struct stat *sb, cloudabi_filestat_t *csb)
 {
 	cloudabi_filestat_t res = {
 		.st_dev		= sb->st_dev,
@@ -1027,7 +1027,7 @@ cloudabi_sys_file_stat_fget(struct lwp *l,
 	}
 
 	/* Convert results and return them. */
-	convert_stat(fp, &sb, &csb);
+	convert_stat(&sb, &csb);
 	csb.st_filetype = cloudabi_convert_filetype(fp);
 	fd_putfile(SCARG(uap, fd));
 	return (copyout(&csb, SCARG(uap, buf), sizeof(csb)));
@@ -1161,7 +1161,7 @@ cloudabi_sys_file_stat_get(struct lwp *l,
 		return (error);
 
 	/* Convert to CloudABI's format. */
-	convert_stat(NULL, &sb, &csb);
+	convert_stat(&sb, &csb);
 	if (S_ISBLK(sb.st_mode))
 		csb.st_filetype = CLOUDABI_FILETYPE_BLOCK_DEVICE;
 	else if (S_ISCHR(sb.st_mode))
