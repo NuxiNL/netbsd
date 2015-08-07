@@ -1,4 +1,4 @@
-/* $NetBSD: ipv6.h,v 1.11 2015/03/26 10:26:37 roy Exp $ */
+/* $NetBSD: ipv6.h,v 1.14 2015/07/09 10:15:34 roy Exp $ */
 
 /*
  * dhcpcd - DHCP client daemon
@@ -31,12 +31,19 @@
 #define IPV6_H
 
 #include <sys/uio.h>
-
 #include <netinet/in.h>
 
-#if defined(__linux__) && defined(__GLIBC__)
-#  define _LINUX_IN6_H
-#  include <linux/ipv6.h>
+#ifndef __linux__
+#  ifndef __QNX__
+#    include <sys/endian.h>
+#  endif
+#  include <net/if.h>
+#  ifdef __FreeBSD__ /* Needed so that including netinet6/in6_var.h works */
+#    include <net/if_var.h>
+#  endif
+#  ifndef __sun
+#    include <netinet6/in6_var.h>
+#  endif
 #endif
 
 #include "config.h"
@@ -198,13 +205,6 @@ struct ipv6_state {
 			CMSG_SPACE(sizeof(int)))
 
 
-/* ipi6.ifiindex differes between OS's so have a cast function */
-#ifdef __linux__
-#define CAST_IPI6_IFINDEX(idx) (int)(idx)
-#else
-#define CAST_IPI6_IFINDEX(idx) (idx)
-#endif
-
 #ifdef INET6
 struct ipv6_ctx {
 	struct sockaddr_in6 from;
@@ -248,8 +248,12 @@ void ipv6_handleifa(struct dhcpcd_ctx *ctx, int, struct if_head *,
     const char *, const struct in6_addr *, uint8_t, int);
 int ipv6_handleifa_addrs(int, struct ipv6_addrhead *,
     const struct in6_addr *, int);
+int ipv6_publicaddr(const struct ipv6_addr *);
 const struct ipv6_addr *ipv6_iffindaddr(const struct interface *,
     const struct in6_addr *);
+int ipv6_hasaddr(const struct interface *);
+int ipv6_findaddrmatch(const struct ipv6_addr *, const struct in6_addr *,
+    short);
 struct ipv6_addr *ipv6_findaddr(struct dhcpcd_ctx *,
     const struct in6_addr *, short);
 #define ipv6_linklocal(ifp) ipv6_iffindaddr((ifp), NULL)
@@ -280,6 +284,7 @@ void ipv6_buildroutes(struct dhcpcd_ctx *);
 #else
 #define ipv6_init(a) (NULL)
 #define ipv6_start(a) (-1)
+#define ipv6_hasaddr(a) (0)
 #define ipv6_free_ll_callbacks(a) {}
 #define ipv6_free(a) {}
 #define ipv6_drop(a) {}

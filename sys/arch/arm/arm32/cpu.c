@@ -1,4 +1,4 @@
-/*	$NetBSD: cpu.c,v 1.107 2015/03/03 23:42:47 jmcneill Exp $	*/
+/*	$NetBSD: cpu.c,v 1.110 2015/07/08 15:26:19 skrll Exp $	*/
 
 /*
  * Copyright (c) 1995 Mark Brinicombe.
@@ -46,7 +46,7 @@
 
 #include <sys/param.h>
 
-__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.107 2015/03/03 23:42:47 jmcneill Exp $");
+__KERNEL_RCSID(0, "$NetBSD: cpu.c,v 1.110 2015/07/08 15:26:19 skrll Exp $");
 
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -840,6 +840,12 @@ identify_features(device_t dv)
 	cpu_processor_features[0] = armreg_pfr0_read();
 	cpu_processor_features[1] = armreg_pfr1_read();
 
+	aprint_verbose_dev(dv, "sctlr: %#x\n", armreg_sctlr_read());
+	aprint_verbose_dev(dv, "actlr: %#x\n", armreg_auxctl_read());
+	aprint_verbose_dev(dv, "revidr: %#x\n", armreg_revidr_read());
+#ifdef MULTIPROCESSOR
+	aprint_verbose_dev(dv, "mpidr: %#x\n", armreg_mpidr_read());
+#endif
 	aprint_verbose_dev(dv,
 	    "isar: [0]=%#x [1]=%#x [2]=%#x [3]=%#x, [4]=%#x, [5]=%#x\n",
 	    cpu_instruction_set_attributes[0],

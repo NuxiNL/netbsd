@@ -1,4 +1,4 @@
-/* $NetBSD: dhcp-common.h,v 1.8 2015/03/26 10:26:37 roy Exp $ */
+/* $NetBSD: dhcp-common.h,v 1.10 2015/07/09 10:15:34 roy Exp $ */
 
 /*
  * dhcpcd - DHCP client daemon
@@ -52,7 +52,7 @@
 #define STRING		(1 << 7)
 #define ARRAY		(1 << 8)
 #define RFC3361		(1 << 9)
-#define RFC3397		(1 << 10)
+#define RFC1035		(1 << 10)
 #define RFC3442		(1 << 11)
 #define RFC5969		(1 << 12)
 #define ADDRIPV6	(1 << 13)
@@ -68,6 +68,8 @@
 #define RAW		(1 << 23)
 #define ESCSTRING	(1 << 24)
 #define ESCFILE		(1 << 25)
+#define BITFLAG		(1 << 26)
+#define RESERVED	(1 << 27)
 
 struct dhcp_opt {
 	uint32_t option; /* Also used for IANA Enterpise Number */
@@ -76,6 +78,7 @@ struct dhcp_opt {
 	char *var;
 
 	int index; /* Index counter for many instances of the same option */
+	char bitflags[8];
 
 	/* Embedded options.
 	 * The option code is irrelevant here. */
@@ -103,12 +106,9 @@ int make_option_mask(const struct dhcp_opt *, size_t,
     uint8_t *, const char *, int);
 
 size_t encode_rfc1035(const char *src, uint8_t *dst);
-ssize_t decode_rfc3397(char *, size_t, const uint8_t *, size_t);
+ssize_t decode_rfc1035(char *, size_t, const uint8_t *, size_t);
 ssize_t print_string(char *, size_t, int, const uint8_t *, size_t);
-ssize_t print_option(char *, size_t, int, const uint8_t *, size_t,
-    const char *);
-int dhcp_set_leasefile(char *, size_t, int,
-    const struct interface *, const char *);
+int dhcp_set_leasefile(char *, size_t, int, const struct interface *);
 
 size_t dhcp_envoption(struct dhcpcd_ctx *,
     char **, const char *, const char *, struct dhcp_opt *,

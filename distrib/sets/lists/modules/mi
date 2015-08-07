@@ -1,10 +1,12 @@
-# $NetBSD: mi,v 1.74 2015/04/18 10:54:59 pgoyette Exp $
+# $NetBSD: mi,v 1.78 2015/05/13 02:17:13 pgoyette Exp $
 #
 # Note: don't delete entries from here - mark them as "obsolete" instead.
 #
 # IMPORTANT:	When you add a module here, you have to add it twice to
 #		md.evbppc as well. evbppc does not use mi, because
 #		powerpc-4xx and powerpc-booke modules are incompatible.
+#		Additionally, you may have to add it once more in md.amd64
+#		(for xen) and twice more for i386 (xen and xen-pae).
 #		Sorry for any inconvenience this may cause, the management.
 #
 ./@MODULEDIR@					base-kernel-modules	kmod
@@ -38,6 +40,8 @@
 ./@MODULEDIR@/coda5/coda5.kmod			base-kernel-modules	kmod
 ./@MODULEDIR@/compat				base-kernel-modules	kmod
 ./@MODULEDIR@/compat/compat.kmod		base-kernel-modules	kmod
+./@MODULEDIR@/compat_sysv			base-kernel-modules	kmod
+./@MODULEDIR@/compat_sysv/compat_sysv.kmod	base-kernel-modules	kmod
 ./@MODULEDIR@/compat_ossaudio			base-kernel-modules	kmod
 ./@MODULEDIR@/compat_ossaudio/compat_ossaudio.kmod	base-kernel-modules	kmod
 ./@MODULEDIR@/coredump				base-kernel-modules	kmod
@@ -228,8 +232,20 @@
 ./@MODULEDIR@/swsensor/swsensor.kmod		base-kernel-modules	kmod
 ./@MODULEDIR@/swwdog				base-kernel-modules	kmod
 ./@MODULEDIR@/swwdog/swwdog.kmod		base-kernel-modules	kmod
+./@MODULEDIR@/sysmon				base-kernel-modules	kmod
+./@MODULEDIR@/sysmon/sysmon.kmod		base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_envsys			base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_envsys/sysmon_envsys.kmod	base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_power			base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_power/sysmon_power.kmod	base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_taskq			base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_taskq/sysmon_taskq.kmod	base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_wdog			base-kernel-modules	kmod
+./@MODULEDIR@/sysmon_wdog/sysmon_wdog.kmod	base-kernel-modules	kmod
 ./@MODULEDIR@/sysvbfs				base-kernel-modules	kmod
 ./@MODULEDIR@/sysvbfs/sysvbfs.kmod		base-kernel-modules	kmod
+./@MODULEDIR@/sysv_ipc				base-kernel-modules	kmod
+./@MODULEDIR@/sysv_ipc/sysv_ipc.kmod		base-kernel-modules	kmod
 ./@MODULEDIR@/tmpfs				base-kernel-modules	kmod
 ./@MODULEDIR@/tmpfs/tmpfs.kmod			base-kernel-modules	kmod
 ./@MODULEDIR@/tprof				base-kernel-modules	kmod

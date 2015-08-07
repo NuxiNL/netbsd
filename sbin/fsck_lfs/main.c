@@ -1,4 +1,4 @@
-/* $NetBSD: main.c,v 1.48 2014/07/13 02:44:21 dholland Exp $	 */
+/* $NetBSD: main.c,v 1.51 2015/07/24 06:59:32 dholland Exp $	 */
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -106,7 +106,7 @@ main(int argc, char **argv)
 		case 'm':
 			lfmode = argtoi('m', "mode", optarg, 8);
 			if (lfmode & ~07777)
-				err(1, "bad mode to -m: %o\n", lfmode);
+				err(1, "bad mode to -m: %o", lfmode);
 			printf("** lost+found creation mode %o\n", lfmode);
 			break;
 
@@ -191,7 +191,7 @@ argtoi(int flag, const char *req, const char *str, int base)
 
 	ret = (int) strtol(str, &cp, base);
 	if (cp == str || *cp)
-		err(FSCK_EXIT_USAGE, "-%c flag requires a %s\n", flag, req);
+		err(FSCK_EXIT_USAGE, "-%c flag requires a %s", flag, req);
 	return (ret);
 }
 
@@ -224,7 +224,7 @@ checkfilesys(const char *filesys, char *mntpt, long auxdata, int child)
 	 * else.
 	 */
 	if (preen == 0) {
-		printf("** Last Mounted on %s\n", fs->lfs_fsmnt);
+		printf("** Last Mounted on %s\n", lfs_sb_getfsmnt(fs));
 		if (hotroot())
 			printf("** Root file system\n");
 		/*
@@ -308,9 +308,9 @@ checkfilesys(const char *filesys, char *mntpt, long auxdata, int child)
 	/*
 	 * print out summary statistics
 	 */
-	pwarn("%llu files, %lld used, %lld free\n",
-	    (unsigned long long)n_files, (long long) n_blks,
-	    (long long) fs->lfs_bfree);
+	pwarn("%ju files, %jd used, %jd free\n",
+	    (uintmax_t) n_files, (intmax_t) n_blks,
+	    (intmax_t) lfs_sb_getbfree(fs));
 
 	ckfini(1);
 

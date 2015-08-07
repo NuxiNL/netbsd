@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.41 2015/02/07 19:36:06 christos Exp $
+#	$NetBSD: Makefile,v 1.43 2015/06/06 13:48:37 joerg Exp $
 #	from: @(#)Makefile	8.1 (Berkeley) 6/12/93
 
 .include <bsd.own.mk>
@@ -17,15 +17,12 @@ CPPFLAGS+= -DIPSEC -I${.CURDIR}
 CPPFLAGS+= -I${NETBSDSRCDIR}/sys/dist/pf
 CPPFLAGS+= -I${NETBSDSRCDIR}/sbin/route
 
-CWARNFLAGS.clang+=	-Wno-format
-COPTS.show.c += -Wno-format-nonliteral
-
 .PATH:  ${.CURDIR}/../../lib/libc/gen
 .PATH:  ${.CURDIR}/../../lib/libc/net
 .PATH:  ${.CURDIR}/../../sbin/route
 CPPFLAGS+= -DRUMP_ACTION
 RUMPSRCS+= sysctlbyname.c sysctlgetmibinfo.c sysctlnametomib.c
-RUMPSRCS+= if_indextoname.c getifaddrs.c
+RUMPSRCS+= if_indextoname.c getifaddrs.c getnameinfo.c
 
 .if (${USE_INET6} != "no")
 CPPFLAGS+= -DINET6

@@ -1,4 +1,4 @@
-/*	$NetBSD: partman.c,v 1.8 2015/01/02 19:43:13 abs Exp $ */
+/*	$NetBSD: partman.c,v 1.11 2015/05/17 10:13:24 martin Exp $ */
 
 /*
  * Copyright 2012 Eugene Lozovoy
@@ -46,7 +46,7 @@
 
 /* flags whether to offer the respective options (depending on helper
    programs available on install media */
-static int have_raid, have_vnd, have_cgd, have_lvm, have_gpt, have_dk;
+int have_raid, have_vnd, have_cgd, have_lvm, have_gpt, have_dk;
 
 /* XXX: replace all MAX_* defines with vars that depend on kernel settings */
 #define MAX_ENTRIES 96
@@ -734,7 +734,7 @@ pm_vnd_edit_menufmt(menudesc *m, int opt, void *arg)
 			break;
 		case PMV_MENU_EXIST:
 			wprintw(m->mw, msg_string(MSG_vnd_assgn_fmt),
-				dev_ptr->is_exist? msg_string(MSG_Yes) : msg_string(MSG_No));
+				dev_ptr->is_exist? msg_string(MSG_No) : msg_string(MSG_Yes));
 			break;
 		case PMV_MENU_SIZE:
 			if (!dev_ptr->is_exist)
@@ -1695,8 +1695,7 @@ pm_gpt_convert(pm_devs_t *pm_cur)
 	int i, error = 0;
 
 	msg_display(MSG_removepartswarn);
-	process_menu(MENU_noyes, NULL);
-	if (! yesno)
+	if (!ask_noyes(NULL))
 		return -1;
 
 	if (! pm_cur->gpt)
@@ -2266,8 +2265,7 @@ pm_needsave(void)
 			/* Oops, we have unsaved changes */
 			changed = 1;
 			msg_display(MSG_saveprompt);
-			process_menu(MENU_yesno, NULL);
-			return (yesno);
+			return ask_yesno(NULL);
 		}
 	return 0;
 }
@@ -2402,8 +2400,7 @@ pm_submenu(menudesc *m, void *arg)
 					return -1;
 				if (pm_cur->blocked) {
 					msg_display(MSG_wannaunblock);
-					process_menu(MENU_noyes, NULL);
-					if (!yesno)
+					if (!ask_noyes(NULL))
 						return -2;
 					pm_cur->blocked = 0;
 				}
@@ -2692,6 +2689,23 @@ pm_menuout(menudesc *m, void *arg)
 	cursel = m->cursel;
 }
 
+/* initialize have_* variables */
+void
+check_available_binaries()
+{
+	static int did_test = false;
+
+	if (did_test) return;
+	did_test = 1;
+
+	have_raid = binary_available("raidctl");
+	have_vnd = binary_available("vnconfig");
+	have_cgd = binary_available("cgdconfig");
+	have_lvm = binary_available("lvm");
+	have_gpt = binary_available("gpt");
+	have_dk = binary_available("dkctl");
+}
+
 /* Main partman function */
 int
 partman(void)
@@ -2702,12 +2716,7 @@ partman(void)
 	part_entry_t args[MAX_ENTRIES];
 
 	if (firstrun) {
-		have_raid = binary_available("raidctl");
-		have_vnd = binary_available("vnconfig");
-		have_cgd = binary_available("cgdconfig");
-		have_lvm = binary_available("lvm");
-		have_gpt = binary_available("gpt");
-		have_dk = binary_available("dkctl");
+		check_available_binaries();
 
 		if (!have_raid)
 			remove_raid_options();
@@ -2792,12 +2801,23 @@ partman(void)
 				pm_lastcheck() != 0 ||
 				pm_savebootsector() != 0) {
 					msg_display(MSG_wannatry);
-					process_menu(MENU_yesno, NULL);
-					args[0].retvalue = (yesno) ? 1:-1;
+					args[0].retvalue = (ask_yesno(NULL)) ? 1:-1;
 			}
 		}
 	} while (args[0].retvalue > 0);
 	
 	/* retvalue <0 - error, retvalue ==0 - user quits, retvalue >0 - all ok */
 	return (args[0].retvalue >= 0)?0:-1;
+}
+
+void
+update_wedges(const char *disk)
+{
+	check_available_binaries();
+
+	if (!have_dk)
+		return;
+
+	run_program(RUN_SILENT | RUN_ERROR_OK,
+	    "dkctl %s makewedges", disk);
 }

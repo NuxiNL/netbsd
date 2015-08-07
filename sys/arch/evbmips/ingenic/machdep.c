@@ -1,4 +1,4 @@
-/*	$NetBSD: machdep.c,v 1.6 2015/04/04 13:06:01 macallan Exp $ */
+/*	$NetBSD: machdep.c,v 1.9 2015/07/11 19:00:04 macallan Exp $ */
 
 /*-
  * Copyright (c) 2014 Michael Lorenz
@@ -27,7 +27,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.6 2015/04/04 13:06:01 macallan Exp $");
+__KERNEL_RCSID(0, "$NetBSD: machdep.c,v 1.9 2015/07/11 19:00:04 macallan Exp $");
 
 #include "opt_ddb.h"
 #include "opt_kgdb.h"
@@ -138,7 +138,7 @@ ingenic_send_ipi(struct cpu_info *ci, int tag)
 
 	msg = 1 << tag;
 
-	if (cpus_running & (1 << cpu_index(ci))) {
+	if (kcpuset_isset(cpus_running, cpu_index(ci))) {
 		if (cpu_index(ci) == 0) {
 			MTC0(msg, CP0_CORE_MBOX, 0);
 		} else {
@@ -242,47 +242,14 @@ consinit(void)
 	 * Everything related to console initialization is done
 	 * in mach_init().
 	 */
+	apbus_init();
 	ingenic_com_cnattach();
 }
 
 void
 cpu_startup(void)
 {
-	char pbuf[9];
-	vaddr_t minaddr, maxaddr;
-#ifdef DEBUG
-	extern int pmapdebug;		/* XXX */
-	int opmapdebug = pmapdebug;
-
-	pmapdebug = 0;		/* Shut up pmap debug during bootstrap */
-#endif
-
-	/*
-	 * Good {morning,afternoon,evening,night}.
-	 */
-	printf("%s%s", copyright, version);
-	printf("%s\n", cpu_getmodel());
-	format_bytes(pbuf, sizeof(pbuf), ctob(physmem));
-	printf("total memory = %s\n", pbuf);
-
-	minaddr = 0;
-	/*
-	 * Allocate a submap for physio
-	 */
-	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
-	    VM_PHYS_SIZE, 0, FALSE, NULL);
-
-	/*
-	 * No need to allocate an mbuf cluster submap.  Mbuf clusters
-	 * are allocated via the pool allocator, and we use KSEG to
-	 * map those pages.
-	 */
-
-#ifdef DEBUG
-	pmapdebug = opmapdebug;
-#endif
-	format_bytes(pbuf, sizeof(pbuf), ptoa(uvmexp.free));
-	printf("avail memory = %s\n", pbuf);
+	cpu_startup_common();
 }
 
 void

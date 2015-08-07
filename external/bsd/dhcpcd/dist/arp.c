@@ -1,5 +1,5 @@
 #include <sys/cdefs.h>
- __RCSID("$NetBSD: arp.c,v 1.11 2015/03/27 18:53:15 christos Exp $");
+ __RCSID("$NetBSD: arp.c,v 1.14 2015/07/09 10:15:34 roy Exp $");
 
 /*
  * dhcpcd - DHCP client daemon
@@ -31,6 +31,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+#include <arpa/inet.h>
+
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -44,9 +46,9 @@
 #define ELOOP_QUEUE 5
 #include "config.h"
 #include "arp.h"
+#include "if.h"
 #include "ipv4.h"
 #include "common.h"
-#include "dhcp.h"
 #include "dhcpcd.h"
 #include "eloop.h"
 #include "if.h"
@@ -57,7 +59,7 @@
 	(sizeof(struct arphdr) + (2 * sizeof(uint32_t)) + (2 * HWADDR_LEN))
 
 static ssize_t
-arp_send(const struct interface *ifp, int op, in_addr_t sip, in_addr_t tip)
+arp_request(const struct interface *ifp, in_addr_t sip, in_addr_t tip)
 {
 	uint8_t arp_buffer[ARP_LEN];
 	struct arphdr ar;
@@ -68,7 +70,7 @@ arp_send(const struct interface *ifp, int op, in_addr_t sip, in_addr_t tip)
 	ar.ar_pro = htons(ETHERTYPE_IP);
 	ar.ar_hln = ifp->hwlen;
 	ar.ar_pln = sizeof(sip);
-	ar.ar_op = htons((uint16_t)op);
+	ar.ar_op = htons(ARPOP_REQUEST);
 
 	p = arp_buffer;
 	len = 0;
@@ -99,12 +101,20 @@ eexit:
 void
 arp_report_conflicted(const struct arp_state *astate, const struct arp_msg *amsg)
 {
-	char buf[HWADDR_LEN * 3];
 
-	logger(astate->iface->ctx, LOG_ERR, "%s: hardware address %s claims %s",
-	    astate->iface->name,
-	    hwaddr_ntoa(amsg->sha, astate->iface->hwlen, buf, sizeof(buf)),
-	    inet_ntoa(astate->failed));
+	if (amsg != NULL) {
+		char buf[HWADDR_LEN * 3];
+
+		logger(astate->iface->ctx, LOG_ERR,
+		    "%s: hardware address %s claims %s",
+		    astate->iface->name,
+		    hwaddr_ntoa(amsg->sha, astate->iface->hwlen,
+		    buf, sizeof(buf)),
+		    inet_ntoa(astate->failed));
+	} else
+		logger(astate->iface->ctx, LOG_ERR,
+		    "%s: DAD detected %s",
+		    astate->iface->name, inet_ntoa(astate->failed));
 }
 
 static void
@@ -116,12 +126,12 @@ arp_packet(void *arg)
 	struct arphdr ar;
 	struct arp_msg arm;
 	ssize_t bytes;
-	struct dhcp_state *state;
+	struct iarp_state *state;
 	struct arp_state *astate, *astaten;
 	unsigned char *hw_s, *hw_t;
 	int flags;
 
-	state = D_STATE(ifp);
+	state = ARP_STATE(ifp);
 	flags = 0;
 	while (!(flags & RAW_EOF)) {
 		bytes = if_readrawpacket(ifp, ETHERTYPE_ARP,
@@ -129,7 +139,7 @@ arp_packet(void *arg)
 		if (bytes == -1) {
 			logger(ifp->ctx, LOG_ERR,
 			    "%s: arp if_readrawpacket: %m", ifp->name);
-			dhcp_close(ifp);
+			arp_close(ifp);
 			return;
 		}
 		/* We must have a full ARP header */
@@ -180,17 +190,17 @@ arp_packet(void *arg)
 static void
 arp_open(struct interface *ifp)
 {
-	struct dhcp_state *state;
+	struct iarp_state *state;
 
-	state = D_STATE(ifp);
-	if (state->arp_fd == -1) {
-		state->arp_fd = if_openrawsocket(ifp, ETHERTYPE_ARP);
-		if (state->arp_fd == -1) {
+	state = ARP_STATE(ifp);
+	if (state->fd == -1) {
+		state->fd = if_openrawsocket(ifp, ETHERTYPE_ARP);
+		if (state->fd == -1) {
 			logger(ifp->ctx, LOG_ERR, "%s: %s: %m",
 			    __func__, ifp->name);
 			return;
 		}
-		eloop_event_add(ifp->ctx->eloop, state->arp_fd,
+		eloop_event_add(ifp->ctx->eloop, state->fd,
 		    arp_packet, ifp, NULL, NULL);
 	}
 }
@@ -226,8 +236,7 @@ arp_announce1(void *arg)
 		    "%s: ARP announcing %s (%d of %d)",
 		    ifp->name, inet_ntoa(astate->addr),
 		    astate->claims, ANNOUNCE_NUM);
-	if (arp_send(ifp, ARPOP_REQUEST,
-		astate->addr.s_addr, astate->addr.s_addr) == -1)
+	if (arp_request(ifp, astate->addr.s_addr, astate->addr.s_addr) == -1)
 		logger(ifp->ctx, LOG_ERR, "send_arp: %m");
 	eloop_timeout_add_sec(ifp->ctx->eloop, ANNOUNCE_WAIT,
 	    astate->claims < ANNOUNCE_NUM ? arp_announce1 : arp_announced,
@@ -274,7 +283,7 @@ arp_probe1(void *arg)
 	    ifp->name, inet_ntoa(astate->addr),
 	    astate->probes ? astate->probes : PROBE_NUM, PROBE_NUM,
 	    timespec_to_double(&tv));
-	if (arp_send(ifp, ARPOP_REQUEST, 0, astate->addr.s_addr) == -1)
+	if (arp_request(ifp, 0, astate->addr.s_addr) == -1)
 		logger(ifp->ctx, LOG_ERR, "send_arp: %m");
 }
 
@@ -290,18 +299,50 @@ arp_probe(struct arp_state *astate)
 }
 
 struct arp_state *
-arp_new(struct interface *ifp) {
+arp_find(struct interface *ifp, const struct in_addr *addr)
+{
+	struct iarp_state *state;
 	struct arp_state *astate;
-	struct dhcp_state *state;
 
-	astate = calloc(1, sizeof(*astate));
-	if (astate == NULL) {
+	if ((state = ARP_STATE(ifp)) == NULL)
+		goto out;
+	TAILQ_FOREACH(astate, &state->arp_states, next) {
+		if (astate->addr.s_addr == addr->s_addr && astate->iface == ifp)
+			return astate;
+	}
+out:
+	errno = ESRCH;
+	return NULL;
+}
+
+struct arp_state *
+arp_new(struct interface *ifp, const struct in_addr *addr)
+{
+	struct iarp_state *state;
+	struct arp_state *astate;
+
+	if ((state = ARP_STATE(ifp)) == NULL) {
+	        ifp->if_data[IF_DATA_ARP] = malloc(sizeof(*state));
+		state = ARP_STATE(ifp);
+		if (state == NULL) {
+			logger(ifp->ctx, LOG_ERR, "%s: %m", __func__);
+			return NULL;
+		}
+		state->fd = -1;
+		TAILQ_INIT(&state->arp_states);
+	} else {
+		if (addr && (astate = arp_find(ifp, addr)))
+			return astate;
+	}
+
+	if ((astate = calloc(1, sizeof(*astate))) == NULL) {
 		logger(ifp->ctx, LOG_ERR, "%s: %s: %m", ifp->name, __func__);
 		return NULL;
 	}
-
 	astate->iface = ifp;
-	state = D_STATE(ifp);
+	if (addr)
+		astate->addr = *addr;
+	state = ARP_STATE(ifp);
 	TAILQ_INSERT_TAIL(&state->arp_states, astate, next);
 	return astate;
 }
@@ -316,27 +357,38 @@ arp_cancel(struct arp_state *astate)
 void
 arp_free(struct arp_state *astate)
 {
-	struct dhcp_state *state;
 
-	if (astate) {
-		eloop_timeout_delete(astate->iface->ctx->eloop, NULL, astate);
-		state = D_STATE(astate->iface);
+	if (astate != NULL) {
+		struct interface *ifp;
+		struct iarp_state *state;
+
+		ifp = astate->iface;
+		eloop_timeout_delete(ifp->ctx->eloop, NULL, astate);
+		state =	ARP_STATE(ifp);
 		TAILQ_REMOVE(&state->arp_states, astate, next);
-		if (state->arp_ipv4ll == astate) {
-			ipv4ll_stop(astate->iface);
-			state->arp_ipv4ll = NULL;
-		}
+		if (astate->free_cb)
+			astate->free_cb(astate);
 		free(astate);
+
+		/* If there are no more ARP states, close the socket. */
+		if (state->fd != -1 &&
+		    TAILQ_FIRST(&state->arp_states) == NULL)
+		{
+			eloop_event_delete(ifp->ctx->eloop, state->fd);
+			close(state->fd);
+			free(state);
+			ifp->if_data[IF_DATA_ARP] = NULL;
+		}
 	}
 }
 
 void
 arp_free_but(struct arp_state *astate)
 {
+	struct iarp_state *state;
 	struct arp_state *p, *n;
-	struct dhcp_state *state;
 
-	state = D_STATE(astate->iface);
+	state = ARP_STATE(astate->iface);
 	TAILQ_FOREACH_SAFE(p, &state->arp_states, next, n) {
 		if (p != astate)
 			arp_free(p);
@@ -346,23 +398,45 @@ arp_free_but(struct arp_state *astate)
 void
 arp_close(struct interface *ifp)
 {
-	struct dhcp_state *state = D_STATE(ifp);
+	struct iarp_state *state;
 	struct arp_state *astate;
 
-	if (state == NULL)
+	/* Freeing the last state will also free the main state,
+	 * so test for both. */
+	for (;;) {
+		if ((state = ARP_STATE(ifp)) == NULL ||
+		    (astate = TAILQ_FIRST(&state->arp_states)) == NULL)
+			break;
+		arp_free(astate);
+	}
+}
+
+void
+arp_handleifa(int cmd, struct interface *ifp, const struct in_addr *addr,
+    int flags)
+{
+#ifdef IN_IFF_DUPLICATED
+	struct iarp_state *state;
+	struct arp_state *astate, *asn;
+
+	if (cmd != RTM_NEWADDR || (state = ARP_STATE(ifp)) == NULL)
 		return;
 
-	if (state->arp_fd != -1) {
-		eloop_event_delete(ifp->ctx->eloop, state->arp_fd, 0);
-		close(state->arp_fd);
-		state->arp_fd = -1;
+	TAILQ_FOREACH_SAFE(astate, &state->arp_states, next, asn) {
+		if (astate->addr.s_addr == addr->s_addr) {
+			if (flags & IN_IFF_DUPLICATED) {
+				if (astate->conflicted_cb)
+					astate->conflicted_cb(astate, NULL);
+			} else if (!(flags & IN_IFF_NOTUSEABLE)) {
+				if (astate->probed_cb)
+					astate->probed_cb(astate);
+			}
+		}
 	}
-
-	while ((astate = TAILQ_FIRST(&state->arp_states))) {
-#ifndef __clang_analyzer__
-		/* clang guard needed for a more compex variant on this bug:
-		 * http://llvm.org/bugs/show_bug.cgi?id=18222 */
-		arp_free(astate);
+#else
+	UNUSED(cmd);
+	UNUSED(ifp);
+	UNUSED(addr);
+	UNUSED(flags);
 #endif
-	}
 }

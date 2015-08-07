@@ -1,4 +1,4 @@
-/*	$NetBSD: ehci.c,v 1.238 2015/03/01 09:53:36 skrll Exp $ */
+/*	$NetBSD: ehci.c,v 1.242 2015/07/11 03:06:25 msaitoh Exp $ */
 
 /*
  * Copyright (c) 2004-2012 The NetBSD Foundation, Inc.
@@ -53,7 +53,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.238 2015/03/01 09:53:36 skrll Exp $");
+__KERNEL_RCSID(0, "$NetBSD: ehci.c,v 1.242 2015/07/11 03:06:25 msaitoh Exp $");
 
 #include "ohci.h"
 #include "uhci.h"
@@ -421,7 +421,7 @@ ehci_init(ehci_softc_t *sc)
 
 	if (EHCI_HCC_64BIT(cparams)) {
 		/* MUST clear segment register if 64 bit capable. */
-		EWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
+		EOWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
 	}
 
 	sc->sc_bus.usbrev = USBREV_2_0;
@@ -452,10 +452,10 @@ ehci_init(ehci_softc_t *sc)
 	 * the controller to host mode.
 	 */
 	if (sc->sc_flags & EHCIF_ETTF) {
-		uint32_t usbmode = EREAD4(sc, EHCI_USBMODE);
+		uint32_t usbmode = EOREAD4(sc, EHCI_USBMODE);
 		usbmode &= ~EHCI_USBMODE_CM;
 		usbmode |= EHCI_USBMODE_CM_HOST;
-		EWRITE4(sc, EHCI_USBMODE, usbmode);
+		EOWRITE4(sc, EHCI_USBMODE, usbmode);
 	}
 
 	/* XXX need proper intr scheduling */
@@ -519,8 +519,8 @@ ehci_init(ehci_softc_t *sc)
 			    EHCI_LINK_QH);
 		}
 		sqh->qh.qh_endp = htole32(EHCI_QH_SET_EPS(EHCI_QH_SPEED_HIGH));
+		sqh->qh.qh_endphub = htole32(EHCI_QH_SET_MULT(1));
 		sqh->qh.qh_curqtd = EHCI_NULL;
-		sqh->next = NULL;
 		sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
 		sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
 		sqh->qh.qh_qtd.qtd_status = htole32(EHCI_QTD_HALTED);
@@ -2095,7 +2095,7 @@ ehci_rem_free_itd_chain(ehci_softc_t *sc, struct ehci_xfer *exfer)
 	prev = NULL;
 
 	if (exfer->itdstart == NULL || exfer->itdend == NULL)
-		panic("ehci isoc xfer being freed, but with no itd chain\n");
+		panic("ehci isoc xfer being freed, but with no itd chain");
 
 	for (itd = exfer->itdstart; itd != NULL; itd = itd->xfer_next) {
 		prev = itd->u.frame_list.prev;
@@ -4175,7 +4175,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 
 #ifdef DIAGNOSTIC
 	if (xfer->rqflags & URQ_REQUEST)
-		panic("ehci_device_isoc_start: request\n");
+		panic("ehci_device_isoc_start: request");
 
 	if (!exfer->isdone) {
 		USBHIST_LOG(ehcidebug, "marked not done, ex = %p", exfer,
@@ -4344,7 +4344,7 @@ ehci_device_isoc_start(usbd_xfer_handle xfer)
 	itd = start;
 	for (j = 0; j < frames; j++) {
 		if (itd == NULL)
-			panic("ehci: unexpectedly ran out of isoc itds, isoc_start\n");
+			panic("ehci: unexpectedly ran out of isoc itds, isoc_start");
 
 		itd->itd.itd_next = sc->sc_flist[frindex];
 		if (itd->itd.itd_next == 0)

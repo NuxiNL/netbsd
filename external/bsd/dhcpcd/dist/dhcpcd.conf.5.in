@@ -1,4 +1,4 @@
-.\"     $NetBSD: dhcpcd.conf.5.in,v 1.19 2015/03/26 10:26:37 roy Exp $
+.\"     $NetBSD: dhcpcd.conf.5.in,v 1.22 2015/07/09 10:15:34 roy Exp $
 .\" Copyright (c) 2006-2015 Roy Marples
 .\" All rights reserved
 .\"
@@ -23,7 +23,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 17, 2015
+.Dd July 9, 2015
 .Dt DHCPCD.CONF 5
 .Os
 .Sh NAME
@@ -111,6 +111,11 @@ Only accept packets from
 is ignored if
 .Ic whitelist
 is set.
+.It Ic bootp
+Be a BOOTP client.
+Basically, this just doesn't send a DHCP Message Type option and will only
+interact with a BOOTP server.
+All other DHCP options still work.
 .It Ic broadcast
 Instructs the DHCP server to broadcast replies back to the client.
 Normally this is only set for non Ethernet interfaces,
@@ -258,6 +263,8 @@ Unless a
 .Ar sla_id
 of 0 is assigned, a reject route is installed for the Delegated Prefix to
 stop unallocated addresses being resolved upstream.
+This reject route is in essence SLA 0, thus you need space within the prefix
+to assign a SLA per interface.
 If no
 .Ar interface
 is given then we will assign a prefix to every other interface with a
@@ -304,30 +311,23 @@ The DHCPv6 server is going to provide us with an IPv6 address, a default
 route and a /64 subnet to be delegated to the internal interface.
 The eth1 interface will be automatically configured
 for IPv6 using the first address (::1) from the delegated prefix.
+A second prefix is requested and assigned to two other interfaces.
 .Xr rtadvd 8
-can be used with an empty configuration file on eth1 to provide automatic
+can be used with an empty configuration file on eth1, eth2 and eth3,
+to provide automatic
 IPv6 address configuration for the internal network.
 .Bd -literal -indent
-noipv6rs            # disable routing solicitation
-denyinterfaces eth2 # Don't touch eth2 at all
+noipv6rs                 # disable routing solicitation
+denyinterfaces eth2      # Don't touch eth2 at all
 interface eth0
-    ipv6rs	    # enable routing solicitation get the
-		    # default IPv6 route
-    ia_na 1	    # request an IPv6 address
-    ia_pd 2 eth1/0  # get a /64 and assign it to eth1
+  ipv6rs                 # enable routing solicitation get the
+                         # default IPv6 route
+  ia_na 1                # request an IPv6 address
+  ia_pd 2 eth1/0         # request a PD and assign it to eth1
+  ia_pd 3 eth2/1 eth3/2  # req a PD and assign it to eth2 and eth3
+                         # we cannot use SLA 0 above because we are
+                         # assinging the PD to more than one interface
 .Ed
-.It Ic ia_pd_mix
-To be RFC compliant,
-.Nm dhcpcd
-cannot mix Prefix Delegation with other DHCPv6 address types in the same
-session.
-This has a number of issues: additional DHCP traffic and potential collisions
-between options.
-.Ic ia_pd_mix
-enables
-.Li draft-ietf-dhc-dhcpv6-stateful-issues-06
-support so that Prefix Delegation can be mixed with other address types in
-the same session.
 .It Ic ipv4only
 Only configure IPv4.
 .It Ic ipv6only
@@ -369,6 +369,12 @@ Each time dhcpcd receives an IPv6 Router Adveristment, dhcpcd will manage
 the default route only.
 This allows dhcpcd to prefer an interface for outbound traffic based on metric
 and/or user selection rather than the kernel.
+.It Ic ipv6ra_accept_nopublic
+Some IPv6 routers advertise themselves as a default router without any
+public prefixes or managed addresses.
+Generally, this is incorrect behaviour and
+.Nm dhcpcd
+will ignore the advertisement unless this option is turned on.
 .It Ic ipv6rs
 Enables IPv6 Router Advertisment solicitation.
 This is on by default, but is documented here in the case where it is disabled
@@ -402,6 +408,8 @@ Don't send any ARP requests.
 This also disables IPv4LL.
 .It Ic noauthrequired
 Don't require authentication even though we requested it.
+.It Ic nodelay
+Don't delay for an initial randomised time when starting protocols.
 .It Ic nodev
 Don't load
 .Pa /dev
@@ -452,14 +460,39 @@ You can specify more
 separated by commas, spaces or more
 .Ic option
 lines.
+.Ar option
 Prepend dhcp6_ to
 .Ar option
 to request a DHCPv6 option.
 DHCPv4 options are mapped to DHCPv6 where applicable.
+.Pp
+Prepend nd_ to
+.Ar option
+to handle ND options, but this only works for the
+.Ic nooption ,
+.Ic reject
+and
+.Ic require
+options.
 .It Ic nooption Ar option
-Remove the option from the DHCP message.
-This should only be used when a DHCP server sends a non requested option
-that should not be processed.
+Remove the option from the message before it's processed.
+.It Ic require Ar option
+Requires the
+.Ar option
+to be present in all messages, otherwise the message is ignored.
+To enforce that
+.Nm dhcpcd
+only responds to DHCP servers and not BOOTP servers, you can
+.Ic require
+.Ar dhcp_message_type .
+This isn't an exact science though because a BOOTP server can send DHCP like
+options.
+.It Ic reject Ar option
+Reject a message that contains the
+.Ar option .
+This is useful when you cannot use
+.Ic require
+to select / de-select BOOTP messages.
 .It Ic destination Ar option
 If
 .Nm
@@ -489,27 +522,6 @@ will timeout before moving back to the DISCOVER phase.
 .It Ic release
 .Nm dhcpcd
 will release the lease prior to stopping the interface.
-.It Ic require Ar option
-Requires the
-.Ar option
-to be present in all DHCP messages, otherwise the message is ignored.
-It can be a variable to be used in
-.Xr dhcpcd-run-hooks 8
-or the numerical value.
-You can specify more options separated by commas, spaces or more require lines.
-To enforce that
-.Nm dhcpcd
-only responds to DHCP servers and not BOOTP servers, you can
-.Ic require
-.Ar dhcp_message_type .
-This isn't an exact science though because a BOOTP server can send DHCP like
-options.
-.It Ic reject Ar option
-Reject a DHCP message that contains the
-.Ar option .
-This is useful when you cannot use
-.Ic require
-to select / de-select BOOTP messages.
 .It Ic script Ar script
 Use
 .Ar script
@@ -620,9 +632,10 @@ Use the last four bytes of the hardware address as the DHCP xid instead
 of a randomly generated number.
 .El
 .Ss Defining new options
-DHCP allows for the use of custom options.
+DHCP, ND and DHCPv6 allow for the use of custom options.
 Each option needs to be started with the
-.Ic define
+.Ic define ,
+.If definend
 or
 .Ic define6
 directive.
@@ -645,6 +658,17 @@ with a name of
 .Ar variable
 exported to
 .Xr dhcpcd-run-hooks 8 .
+.It Ic definend Ar code Ar type Ar variable
+Defines the ND option
+.Ar code
+of
+.Ar type
+with a name of
+.Ar variable
+exported to
+.Xr dhcpcd-run-hooks 8 ,
+with a prefix of
+.Va _nd .
 .It Ic define6 Ar code Ar type Ar variable
 Defines the DHCPv6 option
 .Ar code
@@ -677,6 +701,11 @@ is not the same as defined in the parent option,
 it is prefixed with the parent
 .Ar variable
 first with an underscore.
+If the
+.Ar variable
+has the name of
+.Ar reserved
+then it is not processed.
 .It Ic encap Ar code Ar type Ar variable
 Defines an encapsulated variable within the defined option.
 The length is determined by the
@@ -710,35 +739,42 @@ Lengths can be specified for string and binhex types, but this is generally
 with other data embedded afterwards in the same option.
 .Bl -tag -width indent
 .It Ic ipaddress
-An IPv4 address, 4 bytes
+An IPv4 address, 4 bytes.
 .It Ic ip6address
-An IPv6 address, 16 bytes
+An IPv6 address, 16 bytes.
 .It Ic string Op : Ic length
 A NVT ASCII string of printable characters.
 .It Ic byte
-A byte
+A byte.
+.It Ic bitflags : Ic flags
+A byte represented as a string of flags, most significant bit first.
+For example, using ABCDEFGH then A would equal 10000000, B 01000000,
+C 00100000, etc.
+If the bit is not set, the flag is not printed.
+A flag of 0 is not printed even if the bit postition is set.
+This is to allow reservation of the first bits while assinging the last bits.
 .It Ic int16
-A signed 16bit integer, 2 bytes
+A signed 16bit integer, 2 bytes.
 .It Ic uint16
-An unsigned 16bit integer, 2 bytes
+An unsigned 16bit integer, 2 bytes.
 .It Ic int32
-A signed 32bit integer, 4 bytes
+A signed 32bit integer, 4 bytes.
 .It Ic uint32
-An unsigned 32bit integer, 4 bytes
-.It Ic flag 
-A fixed value (1) to indicate that the option is present, 0 bytes
+An unsigned 32bit integer, 4 bytes.
+.It Ic flag
+A fixed value (1) to indicate that the option is present, 0 bytes.
 .It Ic domain
-A RFC 3397 encoded string
+A RFC 3397 encoded string.
 .It Ic dname
-A RFC 1035 validated string
+A RFC 1035 validated string.
 .It Ic binhex Op : Ic length
-Binary data expressed as hexadecimal
+Binary data expressed as hexadecimal.
 .It Ic embed
-Contains embedded options (implies encap as well)
+Contains embedded options (implies encap as well).
 .It Ic encap
-Contains encapsulated options (implies embed as well)
+Contains encapsulated options (implies embed as well).
 .It Ic option
-References an option from the global definition
+References an option from the global definition.
 .El
 .Ss Example definition
 .D1 # DHCP option 81, Fully Qualified Domain Name, RFC4702

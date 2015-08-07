@@ -1,4 +1,4 @@
-/*	$NetBSD: hyperentropy.c,v 1.8 2015/04/13 16:46:33 riastradh Exp $	*/
+/*	$NetBSD: hyperentropy.c,v 1.10 2015/04/21 04:05:57 riastradh Exp $	*/
 
 /*
  * Copyright (c) 2014 Antti Kantee.  All Rights Reserved.
@@ -26,7 +26,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: hyperentropy.c,v 1.8 2015/04/13 16:46:33 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: hyperentropy.c,v 1.10 2015/04/21 04:05:57 riastradh Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>

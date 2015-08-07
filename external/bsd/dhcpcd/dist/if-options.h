@@ -1,4 +1,4 @@
-/* $NetBSD: if-options.h,v 1.9 2015/03/26 10:26:37 roy Exp $ */
+/* $NetBSD: if-options.h,v 1.12 2015/07/09 10:15:34 roy Exp $ */
 
 /*
  * dhcpcd - DHCP client daemon
@@ -106,11 +106,21 @@
 #define DHCPCD_IAID			(1ULL << 48)
 #define DHCPCD_DHCP			(1ULL << 49)
 #define DHCPCD_DHCP6			(1ULL << 50)
-#define DHCPCD_NOPFXDLG			(1ULL << 51)
-#define DHCPCD_PFXDLGONLY		(1ULL << 52)
-#define DHCPCD_PFXDLGMIX		(1ULL << 53)
+// unassigned				(1ULL << 51)
+// unassigned				(1ULL << 52)
+// unassinged				(1ULL << 53)
 #define DHCPCD_IPV6RA_AUTOCONF		(1ULL << 54)
 #define DHCPCD_ROUTER_HOST_ROUTE_WARNED	(1ULL << 55)
+#define DHCPCD_IPV6RA_ACCEPT_NOPUBLIC	(1ULL << 56)
+#define DHCPCD_BOOTP			(1ULL << 57)
+#define DHCPCD_INITIAL_DELAY		(1ULL << 58)
+
+#define DHCPCD_NODROP	(DHCPCD_EXITING | DHCPCD_PERSISTENT)
+
+#define DHCPCD_WAITOPTS	(DHCPCD_WAITIP | DHCPCD_WAITIP4 | DHCPCD_WAITIP6)
+
+#define DHCPCD_WARNINGS	(DHCPCD_CSR_WARNED | \
+		DHCPCD_ROUTER_HOST_ROUTE_WARNED)
 
 extern const struct option cf_options[];
 
@@ -140,17 +150,22 @@ struct vivco {
 };
 
 struct if_options {
+	time_t mtime;
 	uint8_t iaid[4];
 	int metric;
 	uint8_t requestmask[256 / NBBY];
 	uint8_t requiremask[256 / NBBY];
 	uint8_t nomask[256 / NBBY];
 	uint8_t rejectmask[256 / NBBY];
+	uint8_t dstmask[256 / NBBY];
+	uint8_t requestmasknd[(UINT16_MAX + 1) / NBBY];
+	uint8_t requiremasknd[(UINT16_MAX + 1) / NBBY];
+	uint8_t nomasknd[(UINT16_MAX + 1) / NBBY];
+	uint8_t rejectmasknd[(UINT16_MAX + 1) / NBBY];
 	uint8_t requestmask6[(UINT16_MAX + 1) / NBBY];
 	uint8_t requiremask6[(UINT16_MAX + 1) / NBBY];
 	uint8_t nomask6[(UINT16_MAX + 1) / NBBY];
 	uint8_t rejectmask6[(UINT16_MAX + 1) / NBBY];
-	uint8_t dstmask[256 / NBBY];
 	uint32_t leasetime;
 	time_t timeout;
 	time_t reboot;
@@ -184,6 +199,8 @@ struct if_options {
 
 	struct dhcp_opt *dhcp_override;
 	size_t dhcp_override_len;
+	struct dhcp_opt *nd_override;
+	size_t nd_override_len;
 	struct dhcp_opt *dhcp6_override;
 	size_t dhcp6_override_len;
 	uint32_t vivco_en;

@@ -1,4 +1,4 @@
-$NetBSD: usbdevs,v 1.696 2015/04/06 17:15:32 bouyer Exp $
+$NetBSD: usbdevs,v 1.698 2015/07/03 13:15:54 skrll Exp $
 
 /*
  * Copyright (c) 1998-2004 The NetBSD Foundation, Inc.
@@ -1979,8 +1979,9 @@ product LACIE HD		0xa601	Hard Disk
 product LACIE CDRW		0xa602	CD R/W
 
 /* Lenovo products */
-product LENOVO ETHERNET		0x7203	USB 2.0 Ethernet
 product LENOVO AX88179		0x304b	AX88179 USB 3.0 gigabit ethernet controller
+product LENOVO COMPACTKBDWTP	0x6047	ThinkPad Compact USB keyboard with TrackPoint
+product LENOVO ETHERNET		0x7203	USB 2.0 Ethernet
 
 /* Lexar products */
 product LEXAR JUMPSHOT		0x0001	jumpSHOT CompactFlash Reader
@@ -2476,6 +2477,7 @@ product PANASONIC KXLRW32AN	0x0d09	CD-R Drive KXL-RW32AN
 product PANASONIC KXLCB20AN	0x0d0a	CD-R Drive KXL-CB20AN
 product PANASONIC KXLCB35AN	0x0d0e	DVD-ROM & CD-R/RW
 product PANASONIC SDCAAE	0x1b00	MultiMediaCard Adapter
+product PANASONIC DMCFS45	0x2372	Lumix Camera DMC-FS45
 product PANASONIC TYTP50P6S	0x3900	TY-TP50P6-S 50in Touch Panel
 
 /* PARA Industrial products */

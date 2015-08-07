@@ -1,4 +1,4 @@
-# LIST OF CHANGES FROM LAST RELEASE:			<$Revision: 1.2069 $>
+# LIST OF CHANGES FROM LAST RELEASE:			<$Revision: 1.2086 $>
 #
 #
 # [Note: This file does not mention every change made to the NetBSD source tree.
@@ -140,11 +140,9 @@ Changes from NetBSD 7.0 to NetBSD 8.0:
 	dtrace: Add syscall support [christos 20150307]
 	dtrace: Add lockstat support [riastradh, christos 20150308]
 	zoneinfo: Import tzdata2015b. [apb 20150321]
-	service(8): Import adapted script from FreeBSD [ast 20150322]
 	openssl: Import openssl 1.0.1m [spz 20150323]
 	libc: Update to tzcode2015b. [christos 20150324]
 	dhcpcd(8): Import dhcpcd-6.8.1. [roy 20150327]
-	wm(4): Add X540 support [msaitoh 20150327]
 	libpcap: Import 1.7.2. [christos 20150331]
 	tcpdump(8): Import 4.7.3. [christos 20150331]
 	wpa: Import wpa_supplicant and hostapd 2.4. [christos 20150401]
@@ -156,3 +154,21 @@ Changes from NetBSD 7.0 to NetBSD 8.0:
 		Add DMA support to the sdhc controllers on AM335x SoC.
 		Enable DMA for sdhc0 and sdhc1 on BEAGLEBONE [bouyer 20150414]
 	xz(1): Import of XZ 5.2.1. [christos 20150417]
+	libc: Update to tzcode2015d. [christos 20150428]
+	openresolv(8): Import openresolv-3.7.0 [roy 20150501]
+	netinet: Added IN_IFF_TENTATIVE, IN_IFF_DUPLICATED and IN_IFF_DETACHED.
+	         IPV4 addresses now perform DAD using ARP as described in
+		 RFC 5227. [roy 20150502]
+	dhcpcd(8): Import dhcpcd-6.9.0. [roy 20150517]
+	openssl: Import openssl 1.0.1n [christos 20150612]
+	openssl: Import openssl 1.0.1o [christos 20150616]
+	zoneinfo: Import tzdata2015e. [apb 20150621]
+	nfssvc(2): Support 32-bit system calls for the NFS server.
+		[mrg 20150622]
+	gcc: Import GCC 4.8.5.  [mrg 20150624]
+	OpenSSH: Imported 6.9. [christos 20150630]
+	bind: Import version 9.10.2-P2. [christos 20150708]
+	dhcpcd: Import dhcpcd 6.9.1. [roy 20150709]
+	iostat(8): Support fnmatch(3) patterns for disknames.  [mrg 20150709]
+	openssl: Import openssl 1.0.1p [christos 20150709]
+	ntp: Import ntp 4.2.8p3. [christos 20150710]

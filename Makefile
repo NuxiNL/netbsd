@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.312 2015/01/07 20:42:01 joerg Exp $
+#	$NetBSD: Makefile,v 1.316 2015/07/23 08:03:25 mrg Exp $
 
 #
 # This is the top-level makefile for building NetBSD. For an outline of
@@ -98,8 +98,7 @@
 #                    if ${MKCOMPAT} != "no".
 #   do-build:        builds and installs the entire system.
 #   do-x11:          builds and installs X11 if ${MKX11} != "no"; either
-#                    X11R7 from src/external/mit/xorg if ${X11FLAVOUR} == "Xorg"
-#                    or X11R6 from src/x11
+#                    X11R7 from src/external/mit/xorg 
 #   do-extsrc:       builds and installs extsrc if ${MKEXTSRC} != "no".
 #   do-obsolete:     installs the obsolete sets (for the postinstall-* targets).
 #
@@ -181,24 +180,28 @@ _POSTINSTALL_ENV= \
 	SED=${TOOL_SED:Q}		\
 	STAT=${TOOL_STAT:Q}
 
+.if ${MKX11} != "no"
+_POSTINSTALL_X11=-x ${X11SRCDIR:Q}
+.endif
+
 postinstall-check: .PHONY
 	@echo "   === Post installation checks ==="
-	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} -d ${DESTDIR}/ check; if [ $$? -gt 1 ]; then exit 1; fi
+	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} ${_POSTINSTALL_X11} -d ${DESTDIR}/ check; if [ $$? -gt 1 ]; then exit 1; fi
 	@echo "   ================================"
 
 postinstall-fix: .NOTMAIN .PHONY
 	@echo "   === Post installation fixes ==="
-	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} -d ${DESTDIR}/ fix
+	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} ${_POSTINSTALL_X11} -d ${DESTDIR}/ fix
 	@echo "   ==============================="
 
 postinstall-fix-obsolete: .NOTMAIN .PHONY
 	@echo "   === Removing obsolete files ==="
-	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} -d ${DESTDIR}/ fix obsolete
+	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} ${_POSTINSTALL_X11} -d ${DESTDIR}/ fix obsolete
 	@echo "   ==============================="
 
 postinstall-fix-obsolete_stand: .NOTMAIN .PHONY
 	@echo "   === Removing obsolete files ==="
-	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} -d ${DESTDIR}/ fix obsolete_stand
+	${_POSTINSTALL_ENV} ${HOST_SH} ${_POSTINSTALL} -s ${.CURDIR} ${_POSTINSTALL_X11} -d ${DESTDIR}/ fix obsolete_stand
 	@echo "   ==============================="
 
 
@@ -478,11 +481,10 @@ do-build: .PHONY .MAKE
 
 do-x11: .PHONY .MAKE
 .if ${MKX11} != "no"
-.if ${X11FLAVOUR} == "Xorg"
 	${MAKEDIRTARGET} external/mit/xorg/tools all
 	${MAKEDIRTARGET} external/mit/xorg/lib build_install
-.else
-	${MAKEDIRTARGET} x11 build
+.if ${MKCOMPATX11} != "no"
+	${MAKEDIRTARGET} compat build_install BOOTSTRAP_SUBDIRS="../../../external/mit/xorg/lib"
 .endif
 .else
 	@echo "MKX11 is not enabled"

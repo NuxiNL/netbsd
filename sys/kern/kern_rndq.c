@@ -1,4 +1,4 @@
-/*	$NetBSD: kern_rndq.c,v 1.63 2015/04/14 14:18:57 riastradh Exp $	*/
+/*	$NetBSD: kern_rndq.c,v 1.70 2015/04/21 12:55:57 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 1997-2013 The NetBSD Foundation, Inc.
@@ -32,31 +32,26 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: kern_rndq.c,v 1.63 2015/04/14 14:18:57 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: kern_rndq.c,v 1.70 2015/04/21 12:55:57 riastradh Exp $");
 
 #include <sys/param.h>
 #include <sys/atomic.h>
-#include <sys/ioctl.h>
+#include <sys/callout.h>
 #include <sys/fcntl.h>
-#include <sys/select.h>
-#include <sys/poll.h>
+#include <sys/intr.h>
+#include <sys/ioctl.h>
+#include <sys/kauth.h>
+#include <sys/kernel.h>
 #include <sys/kmem.h>
 #include <sys/mutex.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
-#include <sys/kernel.h>
-#include <sys/conf.h>
-#include <sys/systm.h>
-#include <sys/callout.h>
-#include <sys/intr.h>
 #include <sys/rnd.h>
 #include <sys/rndpool.h>
 #include <sys/rndsink.h>
 #include <sys/rndsource.h>
-#include <sys/vnode.h>
-#include <sys/pool.h>
-#include <sys/kauth.h>
-#include <sys/once.h>
 #include <sys/rngtest.h>
+#include <sys/systm.h>
 
 #include <dev/rnd_private.h>
 
@@ -122,7 +117,7 @@ static struct {
 /*
  * Memory pool for sample buffers
  */
-static pool_cache_t rnd_mempc;
+static pool_cache_t rnd_mempc __read_mostly;
 
 /*
  * Global entropy pool and sources.
@@ -131,6 +126,7 @@ static struct {
 	kmutex_t		lock;
 	rndpool_t		pool;
 	LIST_HEAD(, krndsource)	sources;
+	kcondvar_t		cv;
 } rnd_global __cacheline_aligned;
 
 /*
@@ -152,7 +148,8 @@ static krndsource_t rnd_source_no_collect = {
 
 krndsource_t rnd_printf_source, rnd_autoconf_source;
 
-static void *rnd_process, *rnd_wakeup;
+static void *rnd_process __read_mostly;
+static void *rnd_wakeup __read_mostly;
 
 static inline uint32_t	rnd_counter(void);
 static        void	rnd_intr(void *);
@@ -220,9 +217,9 @@ rnd_counter(void)
 
 	binuptime(&bt);
 	ret = bt.sec;
-	ret |= bt.sec >> 32;
-	ret |= bt.frac;
-	ret |= bt.frac >> 32;
+	ret ^= bt.sec >> 32;
+	ret ^= bt.frac;
+	ret ^= bt.frac >> 32;
 
 	return ret;
 }
@@ -265,15 +262,32 @@ rnd_schedule_wakeup(void)
 void
 rnd_getmore(size_t byteswanted)
 {
-	krndsource_t *rs;
+	krndsource_t *rs, *next;
 
 	mutex_spin_enter(&rnd_global.lock);
-	LIST_FOREACH(rs, &rnd_global.sources, list) {
+	LIST_FOREACH_SAFE(rs, &rnd_global.sources, list, next) {
+		/* Skip if there's no callback.  */
 		if (!ISSET(rs->flags, RND_FLAG_HASCB))
 			continue;
 		KASSERT(rs->get != NULL);
-		KASSERT(rs->getarg != NULL);
+
+		/* Skip if there are too many users right now.  */
+		if (rs->refcnt == UINT_MAX)
+			continue;
+
+		/*
+		 * Hold a reference while we release rnd_global.lock to
+		 * call the callback.  The callback may in turn call
+		 * rnd_add_data, which acquires rnd_global.lock.
+		 */
+		rs->refcnt++;
+		mutex_spin_exit(&rnd_global.lock);
 		rs->get(byteswanted, rs->getarg);
+		mutex_spin_enter(&rnd_global.lock);
+		if (--rs->refcnt == 0)
+			cv_broadcast(&rnd_global.cv);
+
+		/* Dribble some goo to the console.  */
 		rnd_printf_verbose("rnd: entropy estimate %zu bits\n",
 		    rndpool_get_entropy_count(&rnd_global.pool));
 		rnd_printf_verbose("rnd: asking source %s for %zu bytes\n",
@@ -502,6 +516,7 @@ rnd_init(void)
 	mutex_init(&rnd_global.lock, MUTEX_DEFAULT, IPL_VM);
 	rndpool_init(&rnd_global.pool);
 	LIST_INIT(&rnd_global.sources);
+	cv_init(&rnd_global.cv, "rndsrc");
 
 	rnd_mempc = pool_cache_init(sizeof(rnd_sample_t), 0, 0, 0,
 				    "rndsample", NULL, IPL_VM,
@@ -657,6 +672,7 @@ rnd_attach_source(krndsource_t *rs, const char *name, uint32_t type,
 
 	rs->type = type;
 	rs->flags = flags;
+	rs->refcnt = 1;
 
 	rs->state = rnd_sample_allocate(rs);
 
@@ -696,6 +712,11 @@ rnd_detach_source(krndsource_t *source)
 
 	mutex_spin_enter(&rnd_global.lock);
 	LIST_REMOVE(source, list);
+	if (0 < --source->refcnt) {
+		do {
+			cv_wait(&rnd_global.cv, &rnd_global.lock);
+		} while (0 < source->refcnt);
+	}
 	mutex_spin_exit(&rnd_global.lock);
 
 	/*

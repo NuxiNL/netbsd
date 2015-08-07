@@ -1,4 +1,4 @@
-/*	$NetBSD: tetris.c,v 1.28 2015/02/19 02:27:30 mrg Exp $	*/
+/*	$NetBSD: tetris.c,v 1.30 2015/06/13 04:53:13 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -196,7 +196,7 @@ main(int argc, char *argv[])
 	}
 
 	snprintf(key_msg, sizeof(key_msg),
-"%s - left   %s - rotate   %s - right   %s - drop   %s - pause   %s - quit   %s - down",
+"%s - left  %s - rotate  %s - right  %s - drop  %s - pause  %s - quit  %s - down",
 		key_write[0], key_write[1], key_write[2], key_write[3],
 		key_write[4], key_write[5], key_write[6]);
 
@@ -341,7 +341,7 @@ onintr(int signo __unused)
 static void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: %s [-ps] [-k keys] [-l level]\n",
+	(void)fprintf(stderr, "usage: %s [-bps] [-k keys] [-l level]\n",
 	    getprogname());
 	exit(1);
 }

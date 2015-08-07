@@ -1,4 +1,4 @@
-/*	$NetBSD: vfs_syscalls.c,v 1.495 2015/04/09 05:08:15 riastradh Exp $	*/
+/*	$NetBSD: vfs_syscalls.c,v 1.500 2015/07/24 13:02:52 maxv Exp $	*/
 
 /*-
  * Copyright (c) 2008, 2009 The NetBSD Foundation, Inc.
@@ -70,7 +70,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: vfs_syscalls.c,v 1.495 2015/04/09 05:08:15 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: vfs_syscalls.c,v 1.500 2015/07/24 13:02:52 maxv Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_fileassoc.h"
@@ -108,7 +108,6 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_syscalls.c,v 1.495 2015/04/09 05:08:15 riastradh
 #include <sys/buf.h>
 
 #include <miscfs/genfs/genfs.h>
-#include <miscfs/syncfs/syncfs.h>
 #include <miscfs/specfs/specdev.h>
 
 #include <nfs/rpcv2.h>
@@ -328,11 +327,11 @@ mount_update(struct lwp *l, struct vnode *vp, const char *path, int flags,
 	mp->mnt_flag &= ~MNT_OP_FLAGS;
 	mp->mnt_iflag &= ~IMNT_WANTRDWR;
 	if ((mp->mnt_flag & (MNT_RDONLY | MNT_ASYNC)) == 0) {
-		if (mp->mnt_syncer == NULL)
-			error = vfs_allocate_syncvnode(mp);
+		if ((mp->mnt_iflag & IMNT_ONWORKLIST) == 0)
+			vfs_syncer_add_to_worklist(mp);
 	} else {
-		if (mp->mnt_syncer != NULL)
-			vfs_deallocate_syncvnode(mp);
+		if ((mp->mnt_iflag & IMNT_ONWORKLIST) != 0)
+			vfs_syncer_remove_from_worklist(mp);
 	}
 	mutex_exit(&mp->mnt_updating);
 	vfs_unbusy(mp, false, NULL);
@@ -574,7 +573,7 @@ sys_unmount(struct lwp *l, const struct sys_unmount_args *uap, register_t *retva
 		return error;
 	}
 
-	NDINIT(&nd, LOOKUP, LOCKLEAF | TRYEMULROOT, pb);
+	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF | TRYEMULROOT, pb);
 	if ((error = namei(&nd)) != 0) {
 		pathbuf_destroy(pb);
 		return error;
@@ -1954,7 +1953,7 @@ dofhopen(struct lwp *l, const void *ufhp, size_t fhsize, int oflags,
 	struct vnode *vp = NULL;
 	kauth_cred_t cred = l->l_cred;
 	file_t *nfp;
-	int indx, error = 0;
+	int indx, error;
 	struct vattr va;
 	fhandle_t *fh;
 	int flags;
@@ -2412,6 +2411,8 @@ do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
 		goto abortop;
 	}
 	error = VOP_LINK(nd.ni_dvp, vp, &nd.ni_cnd);
+	VOP_UNLOCK(nd.ni_dvp);
+	vrele(nd.ni_dvp);
 out2:
 	pathbuf_destroy(linkpb);
 out1:
@@ -4208,7 +4209,7 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	 * locked yet, but (a) namei is insane, and (b) VOP_RENAME is
 	 * insane, so for the time being we need to leave it like this.
 	 */
-	NDINIT(&fnd, DELETE, (LOCKPARENT | TRYEMULROOT | INRENAME), fpb);
+	NDINIT(&fnd, DELETE, (LOCKPARENT | TRYEMULROOT), fpb);
 	if ((error = fd_nameiat(l, fromfd, CAP_RENAMEAT_SOURCE, &fnd)) != 0)
 		goto out2;
 
@@ -4261,7 +4262,7 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	 * XXX Why not pass CREATEDIR always?
 	 */
 	NDINIT(&tnd, RENAME,
-	    (LOCKPARENT | NOCACHE | TRYEMULROOT | INRENAME |
+	    (LOCKPARENT | NOCACHE | TRYEMULROOT |
 		((fvp->v_type == VDIR)? CREATEDIR : 0)),
 	    tpb);
 	if ((error = fd_nameiat(l, tofd, CAP_RENAMEAT_TARGET, &tnd)) != 0)

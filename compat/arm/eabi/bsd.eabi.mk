@@ -1,10 +1,10 @@
-#	$NetBSD: bsd.eabi.mk,v 1.3 2014/08/10 23:26:25 matt Exp $
+#	$NetBSD: bsd.eabi.mk,v 1.5 2015/07/05 20:19:29 matt Exp $
 
 .if !defined(MLIBDIR)
 
 MLIBDIR=		eabi
 
-EARM_COMPAT_FLAGS=	-mfloat-abi=soft
+EARM_COMPAT_FLAGS=	-mfloat-abi=soft -mfpu=none
 EARM_COMPAT_FLAGS+=	-mabi=aapcs-linux
 MKSOFTFLOAT=yes
 
@@ -41,6 +41,7 @@ PTHREAD_MACHINE_ARCH=	${ARM_MACHINE_ARCH}
 BFD_MACHINE_ARCH=	earm
 CSU_MACHINE_ARCH=	${ARM_MACHINE_ARCH}
 GOMP_MACHINE_ARCH=	${ARM_MACHINE_ARCH}
+XORG_MACHINE_ARCH=	${ARM_MACHINE_ARCH}
 
 COMMON_MACHINE_CPU=	arm
 COMPAT_MACHINE_CPU=	arm

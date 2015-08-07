@@ -1,4 +1,4 @@
-/*	$NetBSD: disks.c,v 1.7 2015/01/02 19:43:13 abs Exp $ */
+/*	$NetBSD: disks.c,v 1.10 2015/07/25 07:12:30 isaki Exp $ */
 
 /*
  * Copyright 1997 Piermont Information Systems Inc.
@@ -108,7 +108,6 @@ static int fsck_preen(const char *, int, const char *);
 static void fixsb(const char *, const char *, char);
 static bool is_gpt(const char *);
 static int incoregpt(pm_devs_t *, partinfo *);
-static bool have_gpt_binary(void);
 
 #ifndef DISK_NAMES
 #define DISK_NAMES "wd", "sd", "ld", "raid"
@@ -309,9 +308,9 @@ get_descr_ata(struct disk_desc *dd, int fd)
 	if (!(inqbuf->atap_config != WDC_CFG_CFA_MAGIC &&
 	      (inqbuf->atap_config & WDC_CFG_ATAPI) &&
 	      ((inqbuf->atap_model[0] == 'N' &&
-		  inqbuf->atap_model[1] == 'E') ||
+	        inqbuf->atap_model[1] == 'E') ||
 	       (inqbuf->atap_model[0] == 'F' &&
-		  inqbuf->atap_model[1] == 'X')))) {
+	        inqbuf->atap_model[1] == 'X')))) {
 		needswap = 1;
 	}
 #endif
@@ -379,7 +378,7 @@ get_default_cdrom(void)
 		return cdrom_devices[0];
 
 	(void)sysctlbyname(mib_name, disknames, &len, NULL, 0);
-        for ((name = strtok_r(disknames, " ", &last)); name;
+	for ((name = strtok_r(disknames, " ", &last)); name;
 	    (name = strtok_r(NULL, " ", &last))) {
 		for (arg = cdrom_devices; *arg; ++arg) {
 			cd_dev = *arg;
@@ -469,9 +468,12 @@ find_disks(const char *doingwhat)
 	/* Kill typeahead, it won't be what the user had in mind */
 	fpurge(stdin);
 
-	/* partman_go: <0 - we want to see menu with extended partitioning
-				  ==0 - we want to see simple select disk menu
-				   >0 - we do not want to see any menus, just detect all disks */
+	/*
+	 * partman_go: <0 - we want to see menu with extended partitioning
+	 *            ==0 - we want to see simple select disk menu
+	 *             >0 - we do not want to see any menus, just detect
+	 *                  all disks
+	 */
 	if (partman_go <= 0) {
 		if (numdisks == 0) {
 			/* No disks found! */
@@ -504,11 +506,11 @@ find_disks(const char *doingwhat)
 		}
 		if (partman_go < 0 && selected_disk == numdisks) {
 			partman_go = 1;
-	    	return -2;
+			return -2;
 		} else
 			partman_go = 0;
 		if (selected_disk < 0 || selected_disk >= numdisks)
-	    	return -1;
+			return -1;
 	}
 
 	/* Fill pm struct with device(s) info */
@@ -520,8 +522,8 @@ find_disks(const char *doingwhat)
 			already_found = 0;
 			SLIST_FOREACH(pm_i, &pm_head, l) {
 				pm_last = pm_i;
-				if (!already_found && 
-						strcmp(pm_i->diskdev, disk->dd_name) == 0) {
+				if (!already_found &&
+				    strcmp(pm_i->diskdev, disk->dd_name) == 0) {
 					pm_i->found = 1;
 					break;
 				}
@@ -577,26 +579,15 @@ find_disks(const char *doingwhat)
 	return numdisks;
 }
 
-static bool
-have_gpt_binary(void)
-{
-	static bool did_test = false;
-	static bool have_gpt;
-
-	if (!did_test) {
-		have_gpt = binary_available("gpt");
-		did_test = true;
-	}
-
-	return have_gpt;
-}
 
 void
 label_read(void)
 {
+	check_available_binaries();
+
 	/* Get existing/default label */
 	memset(&pm->oldlabel, 0, sizeof pm->oldlabel);
-	if (!have_gpt_binary() || !pm->gpt)
+	if (!have_gpt || !pm->gpt)
 		incorelabel(pm->diskdev, pm->oldlabel);
 	else
 		incoregpt(pm, pm->oldlabel);
@@ -666,14 +657,16 @@ fmt_fspart(menudesc *m, int ptn, void *arg)
 int
 write_disklabel (void)
 {
+	int rv = 0;
 
 #ifdef DISKLABEL_CMD
 	/* disklabel the disk */
-	return run_program(RUN_DISPLAY, "%s -f /tmp/disktab %s '%s'",
+	rv = run_program(RUN_DISPLAY, "%s -f /tmp/disktab %s '%s'",
 	    DISKLABEL_CMD, pm->diskdev, pm->bsddiskname);
-#else
-	return 0;
+	if (rv == 0)
+		update_wedges(pm->diskdev);
 #endif
+	return rv;
 }
 
 
@@ -794,7 +787,7 @@ make_filesystems(void)
 					    "%s /dev/r%s",
 					    newfs, dev);
 				else {
-			        run_program(RUN_SILENT | RUN_ERROR_OK,
+					run_program(RUN_SILENT | RUN_ERROR_OK,
 					    "umount /mnt2");
 					error = 0;
 				}
@@ -849,7 +842,7 @@ make_fstab(void)
 	if (logfp)
 		(void)fprintf(logfp,
 		    "Making %s/etc/fstab (%s).\n", target_prefix(), pm->diskdev);
-	
+
 	if (f == NULL) {
 		msg_display(MSG_createfstab);
 		if (logfp)
@@ -876,7 +869,7 @@ make_fstab(void)
 			const char *mp = pm_i->bsdlabel[i].pi_mount;
 			const char *fstype = "ffs";
 			int fsck_pass = 0, dump_freq = 0;
-			
+
 			if (dev != NULL)
 				free(dev);
 			if (pm_i->isspecial)
@@ -1020,8 +1013,7 @@ foundffs(struct data *list, size_t num)
 	error = target_mount("", list[0].u.s_val, ' '-'a', list[1].u.s_val);
 	if (error != 0) {
 		msg_display(MSG_mount_failed, list[0].u.s_val);
-		process_menu(MENU_noyes, NULL);
-		if (!yesno)
+		if (!ask_noyes(NULL))
 			return error;
 	}
 	return 0;
@@ -1071,8 +1063,7 @@ fsck_preen(const char *disk, int ptn, const char *fsname)
 	free(prog);
 	if (error != 0) {
 		msg_display(MSG_badfs, disk, ptn, error);
-		process_menu(MENU_noyes, NULL);
-		if (yesno)
+		if (ask_noyes(NULL))
 			error = 0;
 		/* XXX at this point maybe we should run a full fsck? */
 	}
@@ -1213,10 +1204,11 @@ mount_disks(void)
 }
 
 int
-set_swap_if_low_ram(const char *disk, partinfo *pp) {
-        if (get_ramsize() <= 32) 
-                return set_swap(disk, pp);
-        return 0;
+set_swap_if_low_ram(const char *disk, partinfo *pp)
+{
+	if (get_ramsize() <= 32)
+		return set_swap(disk, pp);
+	return 0;
 }
 
 int
@@ -1481,7 +1473,9 @@ incoregpt(pm_devs_t *pm_cur, partinfo *lp)
 static bool
 is_gpt(const char *dev)
 {
-	if (!have_gpt_binary())
+	check_available_binaries();
+
+	if (!have_gpt)
 		return false;
 
 	return !run_program(RUN_SILENT | RUN_ERROR_OK,

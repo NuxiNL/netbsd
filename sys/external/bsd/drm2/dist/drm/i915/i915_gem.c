@@ -1869,6 +1869,15 @@ out:
 	uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap, uobj);
 	if (ret == -ERESTART)
 		uvm_wait("i915flt");
+
+	/*
+	 * Remap EINTR to success, so that we return to userland.
+	 * On the way out, we'll deliver the signal, and if the signal
+	 * is not fatal then the user code which faulted will most likely
+	 * fault again, and we'll come back here for another try.
+	 */
+	if (ret == -EINTR)
+		ret = 0;
 	/* XXX Deal with GPU hangs here...  */
 	intel_runtime_pm_put(dev_priv);
 	/* XXX errno Linux->NetBSD */
@@ -2806,21 +2815,10 @@ void i915_vma_move_to_active(struct i915_vma *vma,
 static void
 i915_gem_object_move_to_inactive(struct drm_i915_gem_object *obj)
 {
-	struct drm_device *dev = obj->base.dev;
-	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 	struct i915_address_space *vm;
 	struct i915_vma *vma;
 
-	if ((obj->base.write_domain & I915_GEM_DOMAIN_GTT) != 0) {
-		printk(KERN_ERR "%s: %p 0x%x flushing gtt\n", __func__, obj,
-			obj->base.write_domain);
-		i915_gem_object_flush_gtt_write_domain(obj);
-	}
-	if ((obj->base.write_domain & I915_GEM_DOMAIN_CPU) != 0) {
-		printk(KERN_ERR "%s: %p 0x%x flushing cpu\n", __func__, obj,
-			obj->base.write_domain);
-		i915_gem_object_flush_cpu_write_domain(obj, false);
-	}
 	BUG_ON(obj->base.write_domain & ~I915_GEM_GPU_DOMAINS);
 	BUG_ON(!obj->active);
 

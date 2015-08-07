@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_vnops.c,v 1.270 2015/03/27 17:27:56 riastradh Exp $	*/
+/*	$NetBSD: lfs_vnops.c,v 1.277 2015/07/26 08:13:23 hannken Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003 The NetBSD Foundation, Inc.
@@ -125,7 +125,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.270 2015/03/27 17:27:56 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_vnops.c,v 1.277 2015/07/26 08:13:23 hannken Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_compat_netbsd.h"
@@ -420,8 +420,8 @@ lfs_fsync(void *v)
 				     PGO_CLEANIT | (wait ? PGO_SYNCIO : 0));
 		if (error == EAGAIN) {
 			mutex_enter(&lfs_lock);
-			mtsleep(&fs->lfs_avail, PCATCH | PUSER, "lfs_fsync",
-				hz / 100 + 1, &lfs_lock);
+			mtsleep(&fs->lfs_availsleep, PCATCH | PUSER,
+				"lfs_fsync", hz / 100 + 1, &lfs_lock);
 			mutex_exit(&lfs_lock);
 		}
 	} while (error == EAGAIN);
@@ -585,9 +585,7 @@ lfs_mark_vnode(struct vnode *vp)
 	if (!(ip->i_flag & IN_ADIROP)) {
 		if (!(vp->v_uflag & VU_DIROP)) {
 			mutex_exit(&lfs_lock);
-			mutex_enter(vp->v_interlock);
-			if (lfs_vref(vp) != 0)
-				panic("lfs_mark_vnode: could not vref");
+			vref(vp);
 			mutex_enter(&lfs_lock);
 			++lfs_dirvcount;
 			++fs->lfs_dirvcount;
@@ -638,6 +636,7 @@ lfs_symlink(void *v)
 
 	KASSERT(vpp != NULL);
 	KASSERT(*vpp == NULL);
+	KASSERT(ap->a_vap->va_type == VLNK);
 
 	/* XXX should handle this material another way */
 	ulr = &VTOI(ap->a_dvp)->i_crap;
@@ -649,31 +648,12 @@ lfs_symlink(void *v)
 		return EROFS;
 	}
 
-	/*
-	 * Get a new vnode *before* adjusting the dirop count, to
-	 * avoid a deadlock in getnewvnode(), if we have a stacked
-	 * filesystem mounted on top of us.
-	 *
-	 * NB: this means we have to destroy the new vnode on error.
-	 */
-
-	error = getnewvnode(VT_LFS, dvp->v_mount, lfs_vnodeop_p, NULL, vpp);
-	if (error) {
-		DLOG((DLOG_ALLOC, "lfs_mkdir: dvp %p error %d\n", dvp, error));
-		return error;
-	}
-	KASSERT(*vpp != NULL);
-
 	error = lfs_set_dirop(dvp, NULL);
-	if (error) {
-		ungetnewvnode(*vpp);
-		*vpp = NULL;
+	if (error)
 		return error;
-	}
 
 	fstrans_start(dvp->v_mount, FSTRANS_SHARED);
-	error = ulfs_makeinode(LFS_IFLNK | ap->a_vap->va_mode, dvp, ulr,
-			      vpp, ap->a_cnp);
+	error = ulfs_makeinode(ap->a_vap, dvp, ulr, vpp, ap->a_cnp);
 	if (error) {
 		goto out;
 	}
@@ -708,7 +688,6 @@ out:
 	UNMARK_VNODE(*vpp);
 	if (!((*vpp)->v_uflag & VU_DIROP)) {
 		KASSERT(error != 0);
-		ungetnewvnode(*vpp);
 		*vpp = NULL;
 	}
 	else {
@@ -734,7 +713,6 @@ lfs_mknod(void *v)
 	struct vattr *vap;
 	struct inode *ip;
 	int error;
-	struct mount	*mp;
 	ino_t		ino;
 	struct ulfs_lookup_results *ulr;
 
@@ -755,38 +733,18 @@ lfs_mknod(void *v)
 		return EROFS;
 	}
 
-	/*
-	 * Get a new vnode *before* adjusting the dirop count, to
-	 * avoid a deadlock in getnewvnode(), if we have a stacked
-	 * filesystem mounted on top of us.
-	 *
-	 * NB: this means we have to destroy the new vnode on error.
-	 */
-
-	error = getnewvnode(VT_LFS, dvp->v_mount, lfs_vnodeop_p, NULL, vpp);
-	if (error) {
-		DLOG((DLOG_ALLOC, "lfs_mknod: dvp %p error %d\n", dvp, error));
-		return error;
-	}
-	KASSERT(*vpp != NULL);
-
 	error = lfs_set_dirop(dvp, NULL);
-	if (error) {
-		ungetnewvnode(*vpp);
-		*vpp = NULL;
+	if (error)
 		return error;
-	}
 
 	fstrans_start(ap->a_dvp->v_mount, FSTRANS_SHARED);
-	error = ulfs_makeinode(MAKEIMODE(vap->va_type, vap->va_mode),
-			      dvp, ulr, vpp, ap->a_cnp);
+	error = ulfs_makeinode(vap, dvp, ulr, vpp, ap->a_cnp);
 
 	/* Either way we're done with the dirop at this point */
 	UNMARK_VNODE(dvp);
 	UNMARK_VNODE(*vpp);
 	if (!((*vpp)->v_uflag & VU_DIROP)) {
 		KASSERT(error != 0);
-		ungetnewvnode(*vpp);
 		*vpp = NULL;
 	}
 	else {
@@ -808,23 +766,8 @@ lfs_mknod(void *v)
 
 	VN_KNOTE(dvp, NOTE_WRITE);
 	ip = VTOI(*vpp);
-	mp  = (*vpp)->v_mount;
 	ino = ip->i_number;
 	ip->i_flag |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
-	if (vap->va_rdev != VNOVAL) {
-		struct ulfsmount *ump = ip->i_ump;
-		KASSERT(fs == ip->i_lfs);
-		/*
-		 * Want to be able to use this to make badblock
-		 * inodes, so don't truncate the dev number.
-		 */
-		if (ump->um_fstype == ULFS1)
-			ip->i_ffs1_rdev = ulfs_rw32(vap->va_rdev,
-			    ULFS_MPNEEDSWAP(fs));
-		else
-			ip->i_ffs2_rdev = ulfs_rw64(vap->va_rdev,
-			    ULFS_MPNEEDSWAP(fs));
-	}
 
 	/*
 	 * Call fsync to write the vnode so that we don't have to deal with
@@ -839,23 +782,9 @@ lfs_mknod(void *v)
 		      (unsigned long long)ino);
 		/* return (error); */
 	}
-	/*
-	 * Remove vnode so that it will be reloaded by VFS_VGET and
-	 * checked to see if it is an alias of an existing entry in
-	 * the inode cache.
-	 */
-	/* Used to be vput, but that causes us to call VOP_INACTIVE twice. */
-
-	(*vpp)->v_type = VNON;
-	VOP_UNLOCK(*vpp);
-	vgone(*vpp);
-	error = VFS_VGET(mp, ino, vpp);
 
 	fstrans_done(ap->a_dvp->v_mount);
-	if (error != 0) {
-		*vpp = NULL;
-		return (error);
-	}
+	KASSERT(error == 0);
 	VOP_UNLOCK(*vpp);
 	return (0);
 }
@@ -895,29 +824,12 @@ lfs_create(void *v)
 		return EROFS;
 	}
 
-	/*
-	 * Get a new vnode *before* adjusting the dirop count, to
-	 * avoid a deadlock in getnewvnode(), if we have a stacked
-	 * filesystem mounted on top of us.
-	 *
-	 * NB: this means we have to destroy the new vnode on error.
-	 */
-
-	error = getnewvnode(VT_LFS, dvp->v_mount, lfs_vnodeop_p, NULL, vpp);
-	if (error) {
-		DLOG((DLOG_ALLOC, "lfs_create: dvp %p error %d\n", dvp,error));
-		return error;
-	}
 	error = lfs_set_dirop(dvp, NULL);
-	if (error) {
-		ungetnewvnode(*vpp);
-		*vpp = NULL;
+	if (error)
 		return error;
-	}
 
 	fstrans_start(dvp->v_mount, FSTRANS_SHARED);
-	error = ulfs_makeinode(MAKEIMODE(vap->va_type, vap->va_mode),
-			  dvp, ulr, vpp, ap->a_cnp);
+	error = ulfs_makeinode(vap, dvp, ulr, vpp, ap->a_cnp);
 	if (error) {
 		fstrans_done(dvp->v_mount);
 		goto out;
@@ -932,7 +844,6 @@ out:
 	UNMARK_VNODE(*vpp);
 	if (!((*vpp)->v_uflag & VU_DIROP)) {
 		KASSERT(error != 0);
-		ungetnewvnode(*vpp);
 		*vpp = NULL;
 	}
 	else {
@@ -963,7 +874,6 @@ lfs_mkdir(void *v)
 	struct lfs_dirtemplate dirtemplate;
 	struct lfs_direct *newdir;
 	int dirblksiz;
-	int dmode;
 	int error;
 
 	dvp = ap->a_dvp;
@@ -975,6 +885,7 @@ lfs_mkdir(void *v)
 	dp = VTOI(dvp);
 	ip = NULL;
 
+	KASSERT(vap->va_type == VDIR);
 	KASSERT(vpp != NULL);
 	KASSERT(*vpp == NULL);
 
@@ -989,25 +900,9 @@ lfs_mkdir(void *v)
 	}
 	dirblksiz = fs->um_dirblksiz;
 
-	/*
-	 * Get a new vnode *before* adjusting the dirop count, to
-	 * avoid a deadlock in getnewvnode(), if we have a stacked
-	 * filesystem mounted on top of us.
-	 *
-	 * NB: this means we have to destroy the new vnode on error.
-	 */
-
-	error = getnewvnode(VT_LFS, dvp->v_mount, lfs_vnodeop_p, NULL, vpp);
-	if (error) {
-		DLOG((DLOG_ALLOC, "lfs_mkdir: dvp %p error %d\n", dvp, error));
-		return error;
-	}
 	error = lfs_set_dirop(dvp, NULL);
-	if (error) {
-		ungetnewvnode(*vpp);
-		*vpp = NULL;
+	if (error)
 		return error;
-	}
 
 	fstrans_start(dvp->v_mount, FSTRANS_SHARED);
 
@@ -1016,35 +911,26 @@ lfs_mkdir(void *v)
 		goto out;
 	}
 
-	dmode = vap->va_mode & ACCESSPERMS;
-	dmode |= LFS_IFDIR;
 	/*
 	 * Must simulate part of ulfs_makeinode here to acquire the inode,
 	 * but not have it entered in the parent directory. The entry is
 	 * made later after writing "." and ".." entries.
 	 */
-	if ((error = lfs_valloc(dvp, dmode, cnp->cn_cred, vpp)) != 0)
+	error = vcache_new(dvp->v_mount, dvp, vap, cnp->cn_cred, ap->a_vpp);
+	if (error)
 		goto out;
 
-	tvp = *vpp;
-	ip = VTOI(tvp);
-
-	ip->i_uid = kauth_cred_geteuid(cnp->cn_cred);
-	DIP_ASSIGN(ip, uid, ip->i_uid);
-	ip->i_gid = dp->i_gid;
-	DIP_ASSIGN(ip, gid, ip->i_gid);
-#if defined(LFS_QUOTA) || defined(LFS_QUOTA2)
-	if ((error = lfs_chkiq(ip, 1, cnp->cn_cred, 0))) {
-		lfs_vfree(tvp, ip->i_number, dmode);
-		fstrans_done(dvp->v_mount);
-		vput(tvp);
-		goto out2;
+	error = vn_lock(*ap->a_vpp, LK_EXCLUSIVE);
+	if (error) {
+		vrele(*ap->a_vpp);
+		*ap->a_vpp = NULL;
+		goto out;
 	}
-#endif
+
+	tvp = *ap->a_vpp;
+	lfs_mark_vnode(tvp);
+	ip = VTOI(tvp);
 	ip->i_flag |= IN_ACCESS | IN_CHANGE | IN_UPDATE;
-	ip->i_mode = dmode;
-	DIP_ASSIGN(ip, mode, dmode);
-	tvp->v_type = VDIR;	/* Rest init'd in getnewvnode(). */
 	ip->i_nlink = 2;
 	DIP_ASSIGN(ip, nlink, 2);
 	if (cnp->cn_flags & ISWHITEOUT) {
@@ -1128,15 +1014,11 @@ lfs_mkdir(void *v)
 
 out:
 	fstrans_done(dvp->v_mount);
-#if defined(LFS_QUOTA) || defined(LFS_QUOTA2)
-out2:
-#endif
 
 	UNMARK_VNODE(dvp);
 	UNMARK_VNODE(*vpp);
 	if (!((*vpp)->v_uflag & VU_DIROP)) {
 		KASSERT(error != 0);
-		ungetnewvnode(*vpp);
 		*vpp = NULL;
 	}
 	else {
@@ -1231,7 +1113,7 @@ lfs_rmdir(void *v)
 int
 lfs_link(void *v)
 {
-	struct vop_link_args	/* {
+	struct vop_link_v2_args	/* {
 		struct vnode *a_dvp;
 		struct vnode *a_vp;
 		struct componentname *a_cnp;
@@ -1250,12 +1132,6 @@ lfs_link(void *v)
 
 	error = lfs_set_dirop(dvp, NULL);
 	if (error) {
-		/*
-		 * XXX dholland 20140515 this was here before but must
-		 * be wrong.
-		 */
-		vput(dvp);
-
 		return error;
 	}
 
@@ -1353,12 +1229,13 @@ lfs_wrapgo(struct lfs *fs, struct inode *ip, int waitfor)
 	}
 
 	if (--fs->lfs_nowrap == 0) {
-		log(LOG_NOTICE, "%s: re-enabled log wrap\n", fs->lfs_fsmnt);
+		log(LOG_NOTICE, "%s: re-enabled log wrap\n",
+		    lfs_sb_getfsmnt(fs));
 		wakeup(&fs->lfs_wrappass);
 		lfs_wakeup_cleaner(fs);
 	}
 	if (waitfor) {
-		mtsleep(&fs->lfs_nextseg, PCATCH | PUSER, "segment",
+		mtsleep(&fs->lfs_nextsegsleep, PCATCH | PUSER, "segment",
 		    0, &lfs_lock);
 	}
 
@@ -1487,7 +1364,7 @@ lfs_reclaim(void *v)
 	mutex_enter(&lfs_lock);
 	if (ip->i_flags & IN_PAGING) {
 		log(LOG_WARNING, "%s: reclaimed vnode is IN_PAGING\n",
-		    fs->lfs_fsmnt);
+		    lfs_sb_getfsmnt(fs));
 		ip->i_flags &= ~IN_PAGING;
 		TAILQ_REMOVE(&fs->lfs_pchainhd, ip, i_lfs_pchain);
 	}
@@ -1805,31 +1682,34 @@ lfs_flush_pchain(struct lfs *fs)
 	mutex_enter(&lfs_lock);
     top:
 	for (ip = TAILQ_FIRST(&fs->lfs_pchainhd); ip != NULL; ip = nip) {
+		struct mount *mp = ITOV(ip)->v_mount;
+		ino_t ino = ip->i_number;
+
 		nip = TAILQ_NEXT(ip, i_lfs_pchain);
-		vp = ITOV(ip);
 
 		if (!(ip->i_flags & IN_PAGING))
 			goto top;
 
-		mutex_enter(vp->v_interlock);
-		if (vdead_check(vp, VDEAD_NOWAIT) != 0 ||
-		    (vp->v_uflag & VU_DIROP) != 0) {
-			mutex_exit(vp->v_interlock);
-			continue;
-		}
-		if (vp->v_type != VREG) {
-			mutex_exit(vp->v_interlock);
-			continue;
-		}
-		if (lfs_vref(vp))
-			continue;
 		mutex_exit(&lfs_lock);
-
-		if (vn_lock(vp, LK_EXCLUSIVE | LK_NOWAIT | LK_RETRY) != 0) {
-			lfs_vunref(vp);
+		if (vcache_get(mp, &ino, sizeof(ino), &vp) != 0) {
+			mutex_enter(&lfs_lock);
+			continue;
+		};
+		if (vn_lock(vp, LK_EXCLUSIVE | LK_NOWAIT) != 0) {
+			vrele(vp);
 			mutex_enter(&lfs_lock);
 			continue;
 		}
+		ip = VTOI(vp);
+		mutex_enter(&lfs_lock);
+		if ((vp->v_uflag & VU_DIROP) != 0 || vp->v_type != VREG ||
+		    !(ip->i_flags & IN_PAGING)) {
+			mutex_exit(&lfs_lock);
+			vput(vp);
+			mutex_enter(&lfs_lock);
+			goto top;
+		}
+		mutex_exit(&lfs_lock);
 
 		error = lfs_writefile(fs, sp, vp);
 		if (!VPISEMPTY(vp) && !WRITEINPROG(vp) &&
@@ -1842,7 +1722,7 @@ lfs_flush_pchain(struct lfs *fs)
 		error2 = lfs_writeinode(fs, sp, ip);
 
 		VOP_UNLOCK(vp);
-		lfs_vunref(vp);
+		vrele(vp);
 
 		if (error == EAGAIN || error2 == EAGAIN) {
 			lfs_writeseg(fs, sp);
@@ -1978,7 +1858,7 @@ segwait_common:
 		 * to be immediately reclaimed.
 		 */
 		lfs_writer_enter(fs, "pndirop");
-		off = fs->lfs_offset;
+		off = lfs_sb_getoffset(fs);
 		lfs_seglock(fs, SEGM_FORCE_CKP | SEGM_CKP);
 		lfs_flush_dirops(fs);
 		LFS_CLEANERINFO(cip, fs, bp);
@@ -1993,7 +1873,7 @@ segwait_common:
 		LFS_CLEANERINFO(cip, fs, bp);
 		DLOG((DLOG_CLEAN, "lfs_fcntl: reclaim wrote %" PRId64
 		      " blocks, cleaned %" PRId32 " segments (activesb %d)\n",
-		      fs->lfs_offset - off, cip->clean - oclean,
+		      lfs_sb_getoffset(fs) - off, cip->clean - oclean,
 		      fs->lfs_activesb));
 		LFS_SYNC_CLEANERINFO(cip, fs, bp, 0);
 #else
@@ -2059,7 +1939,8 @@ segwait_common:
 			cv_wait(&fs->lfs_stopcv, &lfs_lock);
 		fs->lfs_stoplwp = curlwp;
 		if (fs->lfs_nowrap == 0)
-			log(LOG_NOTICE, "%s: disabled log wrap\n", fs->lfs_fsmnt);
+			log(LOG_NOTICE, "%s: disabled log wrap\n",
+			    lfs_sb_getfsmnt(fs));
 		++fs->lfs_nowrap;
 		if (*(int *)ap->a_data == 1
 		    || ap->a_command == LFCNWRAPSTOP_COMPAT) {
@@ -2104,16 +1985,14 @@ segwait_common:
 		wakeup(&fs->lfs_wrappass);
 		/* Wait for the log to wrap, if asked */
 		if (*(int *)ap->a_data) {
-			mutex_enter(ap->a_vp->v_interlock);
-			if (lfs_vref(ap->a_vp) != 0)
-				panic("LFCNWRAPPASS: lfs_vref failed");
+			vref(ap->a_vp);
 			VTOI(ap->a_vp)->i_lfs_iflags |= LFSI_WRAPWAIT;
 			log(LOG_NOTICE, "LFCNPASS waiting for log wrap\n");
 			error = mtsleep(&fs->lfs_nowrap, PCATCH | PUSER,
 				"segwrap", 0, &lfs_lock);
 			log(LOG_NOTICE, "LFCNPASS done waiting\n");
 			VTOI(ap->a_vp)->i_lfs_iflags &= ~LFSI_WRAPWAIT;
-			lfs_vunref(ap->a_vp);
+			vrele(ap->a_vp);
 		}
 		mutex_exit(&lfs_lock);
 		return error;

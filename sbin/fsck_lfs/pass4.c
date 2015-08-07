@@ -1,4 +1,4 @@
-/* $NetBSD: pass4.c,v 1.22 2013/06/18 18:18:58 christos Exp $	 */
+/* $NetBSD: pass4.c,v 1.24 2015/07/24 06:56:41 dholland Exp $	 */
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -137,7 +137,7 @@ pass4(void)
 			break;
 
 		default:
-			err(EEXIT, "BAD STATE %d FOR INODE I=%llu\n",
+			err(EEXIT, "BAD STATE %d FOR INODE I=%llu",
 			    statemap[inumber], (unsigned long long)inumber);
 		}
 	}
@@ -173,7 +173,7 @@ pass4check(struct inodesc * idesc)
 				sup->su_nbytes -= lfs_fsbtob(fs, 1);
 				VOP_BWRITE(bp);
 				seg_table[sn].su_nbytes -= lfs_fsbtob(fs, 1);
-				++fs->lfs_bfree;
+				lfs_sb_addbfree(fs, 1);
 				n_blks--;
 			}
 		}

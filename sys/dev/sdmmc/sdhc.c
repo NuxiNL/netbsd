@@ -1,4 +1,4 @@
-/*	$NetBSD: sdhc.c,v 1.55 2015/04/14 18:34:29 bouyer Exp $	*/
+/*	$NetBSD: sdhc.c,v 1.61 2015/07/23 23:52:54 jmcneill Exp $	*/
 /*	$OpenBSD: sdhc.c,v 1.25 2009/01/13 19:44:20 grange Exp $	*/
 
 /*
@@ -23,7 +23,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: sdhc.c,v 1.55 2015/04/14 18:34:29 bouyer Exp $");
+__KERNEL_RCSID(0, "$NetBSD: sdhc.c,v 1.61 2015/07/23 23:52:54 jmcneill Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_sdmmc.h"
@@ -55,7 +55,7 @@ void	sdhc_dump_regs(struct sdhc_host *);
 #define SDHC_COMMAND_TIMEOUT	hz
 #define SDHC_BUFFER_TIMEOUT	hz
 #define SDHC_TRANSFER_TIMEOUT	hz
-#define SDHC_DMA_TIMEOUT	hz
+#define SDHC_DMA_TIMEOUT	(hz*3)
 
 struct sdhc_host {
 	struct sdhc_softc *sc;		/* host controller device */
@@ -189,33 +189,32 @@ static void	sdhc_write_data_pio(struct sdhc_host *, uint8_t *, u_int);
 static void	esdhc_read_data_pio(struct sdhc_host *, uint8_t *, u_int);
 static void	esdhc_write_data_pio(struct sdhc_host *, uint8_t *, u_int);
 
-
 static struct sdmmc_chip_functions sdhc_functions = {
 	/* host controller reset */
-	sdhc_host_reset,
+	.host_reset = sdhc_host_reset,
 
 	/* host controller capabilities */
-	sdhc_host_ocr,
-	sdhc_host_maxblklen,
+	.host_ocr = sdhc_host_ocr,
+	.host_maxblklen = sdhc_host_maxblklen,
 
 	/* card detection */
-	sdhc_card_detect,
+	.card_detect = sdhc_card_detect,
 
 	/* write protect */
-	sdhc_write_protect,
+	.write_protect = sdhc_write_protect,
 
-	/* bus power, clock frequency and width */
-	sdhc_bus_power,
-	sdhc_bus_clock,
-	sdhc_bus_width,
-	sdhc_bus_rod,
+	/* bus power, clock frequency, width and ROD(OpenDrain/PushPull) */
+	.bus_power = sdhc_bus_power,
+	.bus_clock = sdhc_bus_clock,
+	.bus_width = sdhc_bus_width,
+	.bus_rod = sdhc_bus_rod,
 
 	/* command execution */
-	sdhc_exec_command,
+	.exec_command = sdhc_exec_command,
 
 	/* card interrupt */
-	sdhc_card_enable_intr,
-	sdhc_card_intr_ack
+	.card_enable_intr = sdhc_card_enable_intr,
+	.card_intr_ack = sdhc_card_intr_ack
 };
 
 static int
@@ -274,7 +273,7 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 	} else {
 		sdhcver = HREAD2(hp, SDHC_HOST_CTL_VERSION);
 	}
-	aprint_normal_dev(sc->sc_dev, "SD Host Specification ");
+	aprint_normal_dev(sc->sc_dev, "SDHC ");
 	hp->specver = SDHC_SPEC_VERSION(sdhcver);
 	switch (SDHC_SPEC_VERSION(sdhcver)) {
 	case SDHC_SPEC_VERS_100:
@@ -289,12 +288,16 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 		aprint_normal("3.0");
 		break;
 
+	case SDHC_SPEC_VERS_400:
+		aprint_normal("4.0");
+		break;
+
 	default:
 		aprint_normal("unknown version(0x%x)",
 		    SDHC_SPEC_VERSION(sdhcver));
 		break;
 	}
-	aprint_normal(", rev.%u\n", SDHC_VENDOR_VERSION(sdhcver));
+	aprint_normal(", rev %u", SDHC_VENDOR_VERSION(sdhcver));
 
 	/*
 	 * Reset the host controller and enable interrupts.
@@ -323,18 +326,21 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 		    ISSET(sc->sc_flags, SDHC_FLAG_EXTDMA_DMAEN))
 			SET(hp->flags, SHF_MODE_DMAEN);
 
-		aprint_normal_dev(sc->sc_dev, "using DMA transfer\n");
+		aprint_normal(", DMA");
+	} else {
+		aprint_normal(", PIO");
 	}
 
 	/*
 	 * Determine the base clock frequency. (2.2.24)
 	 */
-	if (hp->specver == SDHC_SPEC_VERS_300) {
+	if (hp->specver >= SDHC_SPEC_VERS_300) {
 		hp->clkbase = SDHC_BASE_V3_FREQ_KHZ(caps);
 	} else {
 		hp->clkbase = SDHC_BASE_FREQ_KHZ(caps);
 	}
-	if (hp->clkbase == 0) {
+	if (hp->clkbase == 0 ||
+	    ISSET(sc->sc_flags, SDHC_FLAG_NO_CLKBASE)) {
 		if (sc->sc_clkbase == 0) {
 			/* The attachment driver must tell us. */
 			aprint_error_dev(sc->sc_dev,
@@ -350,8 +356,7 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 		    hp->clkbase / 1000);
 		goto err;
 	}
-	DPRINTF(1,("%s: base clock frequency %u MHz\n",
-	    device_xname(sc->sc_dev), hp->clkbase / 1000));
+	aprint_normal(", %u kHz", hp->clkbase);
 
 	/*
 	 * XXX Set the data timeout counter value according to
@@ -363,19 +368,26 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 		HWRITE4(hp, SDHC_NINTR_STATUS, SDHC_CMD_TIMEOUT_ERROR << 16);
 #endif
 
+	if (ISSET(caps, SDHC_EMBEDDED_SLOT))
+		aprint_normal(", embedded slot");
+
 	/*
 	 * Determine SD bus voltage levels supported by the controller.
 	 */
+	aprint_normal(",");
 	if (ISSET(caps, SDHC_VOLTAGE_SUPP_1_8V) &&
 	    (hp->specver < SDHC_SPEC_VERS_300 ||
 	     ISSET(caps, SDHC_EMBEDDED_SLOT))) {
 		SET(hp->ocr, MMC_OCR_1_7V_1_8V | MMC_OCR_1_8V_1_9V);
+		aprint_normal(" 1.8V");
 	}
 	if (ISSET(caps, SDHC_VOLTAGE_SUPP_3_0V)) {
 		SET(hp->ocr, MMC_OCR_2_9V_3_0V | MMC_OCR_3_0V_3_1V);
+		aprint_normal(" 3.0V");
 	}
 	if (ISSET(caps, SDHC_VOLTAGE_SUPP_3_3V)) {
 		SET(hp->ocr, MMC_OCR_3_2V_3_3V | MMC_OCR_3_3V_3_4V);
+		aprint_normal(" 3.3V");
 	}
 
 	/*
@@ -403,9 +415,8 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 		aprint_error_dev(sc->sc_dev, "max block length unknown\n");
 		goto err;
 	}
-	DPRINTF(1, ("%s: max block length %u byte%s\n",
-	    device_xname(sc->sc_dev), hp->maxblklen,
-	    hp->maxblklen > 1 ? "s" : ""));
+	aprint_normal(", %u byte blocks", hp->maxblklen);
+	aprint_normal("\n");
 
 	/*
 	 * Attach the generic SD/MMC bus driver.  (The bus driver must
@@ -424,7 +435,7 @@ sdhc_host_found(struct sdhc_softc *sc, bus_space_tag_t iot,
 	else if (hp->sc->sc_clkmsk != 0)
 		saa.saa_clkmin = hp->clkbase / (hp->sc->sc_clkmsk >>
 		    (ffs(hp->sc->sc_clkmsk) - 1));
-	else if (hp->specver == SDHC_SPEC_VERS_300)
+	else if (hp->specver >= SDHC_SPEC_VERS_300)
 		saa.saa_clkmin = hp->clkbase / 0x3ff;
 	else
 		saa.saa_clkmin = hp->clkbase / 256;
@@ -750,13 +761,20 @@ sdhc_bus_power(sdmmc_chipset_handle_t sch, uint32_t ocr)
 		 * Enable bus power.  Wait at least 1 ms (or 74 clocks) plus
 		 * voltage ramp until power rises.
 		 */
-		HWRITE1(hp, SDHC_POWER_CTL,
-		    HREAD1(hp, SDHC_POWER_CTL) & pcmask);
-		sdmmc_delay(1);
-		HWRITE1(hp, SDHC_POWER_CTL, (vdd << SDHC_VOLTAGE_SHIFT));
-		sdmmc_delay(1);
-		HSET1(hp, SDHC_POWER_CTL, SDHC_BUS_POWER);
-		sdmmc_delay(10000);
+
+		if (ISSET(hp->sc->sc_flags, SDHC_FLAG_SINGLE_POWER_WRITE)) {
+			HWRITE1(hp, SDHC_POWER_CTL,
+			    (vdd << SDHC_VOLTAGE_SHIFT) | SDHC_BUS_POWER);
+		} else {
+			HWRITE1(hp, SDHC_POWER_CTL,
+			    HREAD1(hp, SDHC_POWER_CTL) & pcmask);
+			sdmmc_delay(1);
+			HWRITE1(hp, SDHC_POWER_CTL,
+			    (vdd << SDHC_VOLTAGE_SHIFT));
+			sdmmc_delay(1);
+			HSET1(hp, SDHC_POWER_CTL, SDHC_BUS_POWER);
+			sdmmc_delay(10000);
+		}
 
 		/*
 		 * The host system may not power the bus due to battery low,
@@ -827,7 +845,7 @@ sdhc_clock_divisor(struct sdhc_host *hp, u_int freq, u_int *divp)
 		//freq = hp->clkbase / div;
 		return true;
 	}
-	if (hp->specver == SDHC_SPEC_VERS_300) {
+	if (hp->specver >= SDHC_SPEC_VERS_300) {
 		div = howmany(hp->clkbase, freq);
 		div = div > 1 ? howmany(div, 2) : 0;
 		if (div > 0x3ff)
@@ -1010,8 +1028,14 @@ sdhc_bus_width(sdmmc_chipset_handle_t sch, int width)
 			reg |= SDHC_ESDHC_8BIT_MODE;
 	} else {
 		reg &= ~SDHC_4BIT_MODE;
-		if (width == 4)
+		if (hp->specver >= SDHC_SPEC_VERS_300) {
+			reg &= ~SDHC_8BIT_MODE;
+		}
+		if (width == 4) {
 			reg |= SDHC_4BIT_MODE;
+		} else if (width == 8 && hp->specver >= SDHC_SPEC_VERS_300) {
+			reg |= SDHC_8BIT_MODE;
+		}
 	}
 	HWRITE1(hp, SDHC_HOST_CTL, reg);
 	mutex_exit(&hp->host_mtx);
@@ -1093,6 +1117,17 @@ sdhc_exec_command(sdmmc_chipset_handle_t sch, struct sdmmc_command *cmd)
 			HSET2(hp, SDHC_NINTR_STATUS_EN, ready);
 		}
 		mutex_exit(&hp->intr_mtx);
+	}
+
+	if (ISSET(hp->sc->sc_flags, SDHC_FLAG_NO_TIMEOUT)) {
+		const uint16_t eintr = SDHC_CMD_TIMEOUT_ERROR;
+		if (cmd->c_data != NULL) {
+			HCLR2(hp, SDHC_EINTR_SIGNAL_EN, eintr);
+			HCLR2(hp, SDHC_EINTR_STATUS_EN, eintr);
+		} else {
+			HSET2(hp, SDHC_EINTR_SIGNAL_EN, eintr);
+			HSET2(hp, SDHC_EINTR_STATUS_EN, eintr);
+		}
 	}
 
 	/*
@@ -1308,7 +1343,7 @@ sdhc_transfer_data(struct sdhc_host *hp, struct sdmmc_command *cmd)
 		if (hp->sc->sc_vendor_transfer_data_dma != NULL) {
 			error = hp->sc->sc_vendor_transfer_data_dma(sc, cmd);
 			if (error == 0 && !sdhc_wait_intr(hp,
-			    SDHC_TRANSFER_COMPLETE, SDHC_TRANSFER_TIMEOUT)) {
+			    SDHC_TRANSFER_COMPLETE, SDHC_DMA_TIMEOUT)) {
 				error = ETIMEDOUT;
 			}
 		} else {

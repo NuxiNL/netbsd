@@ -1,4 +1,4 @@
-/*	$NetBSD: bozohttpd.c,v 1.63 2015/03/20 19:54:53 mrg Exp $	*/
+/*	$NetBSD: bozohttpd.c,v 1.66 2015/07/16 12:19:23 shm Exp $	*/
 
 /*	$eterna: bozohttpd.c,v 1.178 2011/11/18 09:21:15 mrg Exp $	*/
 
@@ -109,7 +109,7 @@
 #define INDEX_HTML		"index.html"
 #endif
 #ifndef SERVER_SOFTWARE
-#define SERVER_SOFTWARE		"bozohttpd/20150320"
+#define SERVER_SOFTWARE		"bozohttpd/20150501"
 #endif
 #ifndef DIRECT_ACCESS_FILE
 #define DIRECT_ACCESS_FILE	".bzdirect"
@@ -895,8 +895,12 @@ bozo_escape_rfc3986(bozohttpd_t *httpd, const char *url)
 		case ';':
 		case '=':
 		case '%':
+		case '\n':
+		case '\r':
+		case ' ':
+		case '"':
 		encode_it:
-			snprintf(d, 4, "%%%2X", *s++);
+			snprintf(d, 4, "%%%02X", *s++);
 			d += 3;
 			len += 3;
 			break;
@@ -1093,8 +1097,7 @@ check_virtual(bozo_httpreq_t *request)
 				}
 				debug((httpd, DEBUG_OBESE, "looking at dir``%s''",
 			 	   d->d_name));
-				if (d->d_namlen == len && strcmp(d->d_name,
-				    request->hr_host) == 0) {
+				if (strcmp(d->d_name, request->hr_host) == 0) {
 					/* found it, punch it */
 					debug((httpd, DEBUG_OBESE, "found it punch it"));
 					request->hr_virthostname =
@@ -1332,6 +1335,10 @@ transform_request(bozo_httpreq_t *request, int *isindex)
 		(void)bozo_http_error(httpd, 404, request, "unknown URL");
 		goto bad_done;
 	}
+
+	/* omit additional slashes at the beginning */
+	while (file[1] == '/')
+		file++;
 
 	switch(check_bzredirect(request)) {
 	case -1:
@@ -1861,6 +1868,7 @@ static struct errors_map {
 	{ 404, 	"404 Not Found",	"This item has not been found", },
 	{ 408, 	"408 Request Timeout",	"This request took too long", },
 	{ 417,	"417 Expectation Failed","Expectations not available", },
+	{ 420,	"420 Enhance Your Calm","Chill, Winston", },
 	{ 500,	"500 Internal Error",	"An error occured on the server", },
 	{ 501,	"501 Not Implemented",	"This request is not available", },
 	{ 0,	NULL,			NULL, },

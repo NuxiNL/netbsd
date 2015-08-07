@@ -1,4 +1,4 @@
-#	$NetBSD: NetBSD.dist.base,v 1.143 2015/02/13 18:57:47 nonaka Exp $
+#	$NetBSD: NetBSD.dist.base,v 1.146 2015/07/23 07:45:44 mrg Exp $
 #	@(#)4.4BSD.dist	8.1 (Berkeley) 6/13/93
 
 # Do not customize this file as it may be overwritten on upgrades.
@@ -73,6 +73,7 @@
 ./libdata/firmware/if_otus
 ./libdata/firmware/if_urtwn
 ./libdata/firmware/if_wpi
+./libdata/firmware/radeon
 ./libdata/firmware/ral
 ./libdata/firmware/rum
 ./libdata/firmware/run
@@ -179,7 +180,6 @@
 ./usr/include/g++/tr1
 ./usr/include/g++/tr1_impl
 ./usr/include/g++/tr2
-./usr/include/gcc-4.1
 ./usr/include/gcc-4.5
 ./usr/include/gcc-4.8
 ./usr/include/gssapi
@@ -198,7 +198,6 @@
 ./usr/include/miscfs/overlay
 ./usr/include/miscfs/procfs
 ./usr/include/miscfs/specfs
-./usr/include/miscfs/syncfs
 ./usr/include/miscfs/umapfs
 ./usr/include/miscfs/union
 ./usr/include/msdosfs
@@ -264,7 +263,6 @@
 ./usr/libdata/debug/usr/mdec
 ./usr/libdata/debug/usr/sbin
 ./usr/libdata/firmware
-./usr/libdata/firmware/radeon
 ./usr/libdata/ldscripts
 ./usr/libdata/lint
 ./usr/libexec

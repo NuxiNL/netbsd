@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.845 2015/04/08 06:03:09 mrg Exp $
+#	$NetBSD: bsd.own.mk,v 1.862 2015/07/23 08:03:26 mrg Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -83,7 +83,8 @@ EXTERNAL_GCC_SUBDIR=	gcc
 .else
 EXTERNAL_GCC_SUBDIR=	/does/not/exist
 .endif
-
+.else
+MKGCCCMDS?=	no
 .endif
 
 .if !empty(MACHINE_ARCH:Mearm*)
@@ -226,7 +227,9 @@ NM=		${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-nm
 OBJCOPY=	${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-objcopy
 OBJDUMP=	${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-objdump
 RANLIB=		${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-ranlib
+READELF=	${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-readelf
 SIZE=		${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-size
+STRINGS=	${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-strings
 STRIP=		${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-strip
 
 TOOL_CC.gcc=		${EXTERNAL_TOOLCHAIN}/bin/${MACHINE_GNU_PLATFORM}-gcc
@@ -249,7 +252,9 @@ NM=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-nm
 OBJCOPY=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-objcopy
 OBJDUMP=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-objdump
 RANLIB=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-ranlib
+READELF=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-readelf
 SIZE=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-size
+STRINGS=	${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-strings
 STRIP=		${TOOLDIR}/bin/${MACHINE_GNU_PLATFORM}-strip
 
 # GCC supports C, C++, Fortran and Objective C
@@ -339,6 +344,8 @@ TOOL_M4=		${TOOLDIR}/bin/${_TOOL_PREFIX}m4
 TOOL_MACPPCFIXCOFF=	${TOOLDIR}/bin/${_TOOL_PREFIX}macppc-fixcoff
 TOOL_MAKEFS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makefs
 TOOL_MAKEINFO=		${TOOLDIR}/bin/${_TOOL_PREFIX}makeinfo
+TOOL_MAKEKEYS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makekeys
+TOOL_MAKESTRS=		${TOOLDIR}/bin/${_TOOL_PREFIX}makestrs
 TOOL_MAKEWHATIS=	${TOOLDIR}/bin/${_TOOL_PREFIX}makewhatis
 TOOL_MANDOC_ASCII=	${TOOLDIR}/bin/${_TOOL_PREFIX}mandoc -Tascii
 TOOL_MANDOC_HTML=	${TOOLDIR}/bin/${_TOOL_PREFIX}mandoc -Thtml
@@ -445,6 +452,8 @@ TOOL_M4=		m4
 TOOL_MACPPCFIXCOFF=	macppc-fixcoff
 TOOL_MAKEFS=		makefs
 TOOL_MAKEINFO=		makeinfo
+TOOL_MAKEKEYS=		makekeys
+TOOL_MAKESTRS=		makestrs
 TOOL_MAKEWHATIS=	/usr/libexec/makewhatis
 TOOL_MANDOC_ASCII=	mandoc -Tascii
 TOOL_MANDOC_HTML=	mandoc -Thtml
@@ -754,6 +763,10 @@ MKGDB.ia64=	no
 MKPICLIB:=	no
 .endif
 
+# PowerPC64 and AArch64 ABI's are PIC
+MKPICLIB.powerpc64=	no
+#MKPICLIB.aarch64=	no
+
 #
 # On VAX using ELF, all objects are PIC, not just shared libraries,
 # so don't build the _pic version.
@@ -820,6 +833,7 @@ MACHINE_GNU_PLATFORM?=${MACHINE_GNU_ARCH}--netbsd
 .if !empty(MACHINE_ARCH:M*arm*)
 # Flags to pass to CC for using the old APCS ABI on ARM for compat or stand.
 ARM_APCS_FLAGS=	-mabi=apcs-gnu -mfloat-abi=soft
+ARM_APCS_FLAGS+=${${ACTIVE_CC} == "gcc":? -marm :}
 ARM_APCS_FLAGS+=${${ACTIVE_CC} == "clang":? -target ${MACHINE_GNU_ARCH}--netbsdelf -B ${TOOLDIR}/${MACHINE_GNU_PLATFORM}/bin :}
 .endif
 
@@ -895,17 +909,19 @@ MK${var}:=	yes
 .if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "sparc64" \
     || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
     || ${MACHINE_ARCH} == "powerpc64" || ${MACHINE_CPU} == "aarch64" \
-    || ${MACHINE_ARCH} == "riscv64"
+    || ${MACHINE_ARCH} == "riscv64" \
+    || !empty(MACHINE_ARCH:Mearm*)
 MKCOMPAT?=	yes
-.elif !empty(MACHINE_ARCH:Mearm*)
-MKCOMPAT?=	no
 .else
 # Don't let this build where it really isn't supported.
 MKCOMPAT:=	no
+MKCOMPATTESTS:=	no
+MKCOMPATX11:=	no
 .endif
 
-.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" || \
-    (${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc")
+.if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386" \
+    || ${MACHINE_ARCH} == "mips64eb" || ${MACHINE_ARCH} == "mips64el" \
+    || (${MACHINE} == "evbppc" && ${MACHINE_ARCH} == "powerpc")
 MKCOMPATMODULES?=	yes
 .else
 MKCOMPATMODULES:=	no
@@ -945,9 +961,9 @@ MKBINUTILS?=	${MKBFD}
 .endif
 
 #
-# We want to build zfs only for i386 and amd64 by default for now.
+# We want to build zfs only for amd64 by default for now.
 #
-.if ${MACHINE} == "amd64" || ${MACHINE} == "i386"
+.if ${MACHINE} == "amd64"
 MKZFS?=		yes
 .endif
 
@@ -990,9 +1006,9 @@ MKGCCCMDS?=	${MKGCC}
 #
 # Exceptions to the above:
 #
-#.if ${MACHINE} == "evbppc"
-#MKKMOD=		no
-#.endif
+.if ${MACHINE} == "acorn26"	# page size is prohibitive
+MKKMOD=		no
+.endif
 
 #
 # MK* options which default to "no".  Note that MKZFS has a different
@@ -1000,7 +1016,7 @@ MKGCCCMDS?=	${MKGCC}
 #
 _MKVARS.no= \
 	MKBSDGREP MKBSDTAR \
-	MKCATPAGES MKCRYPTO_RC5 MKCTF MKDEBUG \
+	MKCATPAGES MKCOMPATTESTS MKCOMPATX11 MKCRYPTO_RC5 MKCTF MKDEBUG \
 	MKDEBUGLIB MKDTRACE MKEXTSRC MKGROFFHTMLDOC \
 	MKKYUA MKLLD MKLLDB MKLINT \
 	MKMANZ MKMCLINKER MKOBJDIRS \
@@ -1014,26 +1030,10 @@ ${var}?=	${${var}.${MACHINE_ARCH}:Uno}
 .endfor
 
 #
-# Do we default to XFree86 or Xorg for this platform?
-#
-.if \
-    ${MACHINE} == "acorn32"	|| \
-    ${MACHINE} == "alpha"	|| \
-    ${MACHINE} == "amiga"	|| \
-    ${MACHINE} == "mac68k"	|| \
-    ${MACHINE} == "pmax"	|| \
-    ${MACHINE} == "sun3"
-X11FLAVOUR?=	XFree86
-.else
-X11FLAVOUR?=	Xorg
-.endif
-
-#
 # Which platforms build the xorg-server drivers (as opposed
 # to just Xnest and Xvfb.)
 #
-.if ${X11FLAVOUR} == "Xorg"	&& ( \
-    ${MACHINE} == "alpha"	|| \
+.if ${MACHINE} == "alpha"	|| \
     ${MACHINE} == "amd64"	|| \
     ${MACHINE} == "bebox"	|| \
     ${MACHINE} == "cats"	|| \
@@ -1057,7 +1057,7 @@ X11FLAVOUR?=	Xorg
     ${MACHINE} == "sparc"	|| \
     ${MACHINE} == "sparc64"	|| \
     ${MACHINE} == "vax"		|| \
-    ${MACHINE} == "zaurus"	)
+    ${MACHINE} == "zaurus"
 MKXORG_SERVER?=yes
 .else
 MKXORG_SERVER?=no
@@ -1225,13 +1225,8 @@ X11SRCDIR=		/usr/xsrc
 .endif
 .endif # !defined(X11SRCDIR)
 
-X11SRCDIR.xc?=		${X11SRCDIR}/xfree/xc
 X11SRCDIR.local?=	${X11SRCDIR}/local
-.if ${X11FLAVOUR} == "Xorg"
 X11ROOTDIR?=		/usr/X11R7
-.else
-X11ROOTDIR?=		/usr/X11R6
-.endif
 X11BINDIR?=		${X11ROOTDIR}/bin
 X11ETCDIR?=		/etc/X11
 X11FONTDIR?=		${X11ROOTDIR}/lib/X11/fonts
@@ -1239,7 +1234,7 @@ X11INCDIR?=		${X11ROOTDIR}/include
 X11LIBDIR?=		${X11ROOTDIR}/lib/X11
 X11MANDIR?=		${X11ROOTDIR}/man
 X11SHAREDIR?=		${X11ROOTDIR}/share
-X11USRLIBDIR?=		${X11ROOTDIR}/lib
+X11USRLIBDIR?=		${X11ROOTDIR}/lib${MLIBDIR:D/${MLIBDIR}}
 
 #
 # New modular-xorg based builds
@@ -1247,7 +1242,7 @@ X11USRLIBDIR?=		${X11ROOTDIR}/lib
 X11SRCDIRMIT?=		${X11SRCDIR}/external/mit
 .for _lib in \
 	FS ICE SM X11 XScrnSaver XTrap Xau Xcomposite Xcursor Xdamage \
-	Xdmcp Xevie Xext Xfixes Xfont Xft Xi Xinerama Xmu Xpm \
+	Xdmcp Xevie Xext Xfixes Xfont Xft Xi Xinerama Xmu Xpresent Xpm \
 	Xrandr Xrender Xres Xt Xtst Xv XvMC Xxf86dga Xxf86misc Xxf86vm drm \
 	fontenc xkbfile xkbui Xaw Xfontcache pciaccess xcb \
 	pthread-stubs
@@ -1270,7 +1265,8 @@ X11SRCDIR.${_proto}proto?=		${X11SRCDIRMIT}/${_proto}proto/dist
 	glu glw mesa-demos MesaGLUT MesaLib MesaLib7 \
 	ico iceauth listres lndir \
 	luit xproxymanagementprotocol mkfontdir oclock proxymngr rgb \
-	setxkbmap smproxy twm viewres x11perf xauth xcalc xclipboard \
+	rstart setxkbmap showfont smproxy twm viewres \
+	x11perf xauth xcalc xclipboard \
 	xclock xcmsdb xconsole xditview xdpyinfo xdriinfo xdm \
 	xfd xf86dga xfindproxy xfontsel xfwp xgamma xgc xhost xinit \
 	xkill xload xlogo xlsatoms xlsclients xlsfonts xmag xmessage \
@@ -1298,7 +1294,7 @@ X11SRCDIR.xf86-input-${_i}?=	${X11SRCDIRMIT}/xf86-input-${_i}/dist
 
 .for _v in \
 	ag10e apm ark ast ati ati-kms chips cirrus crime \
-	geode glint i128 i740 igs imstt intel mach64 mga \
+	geode glint i128 i740 igs imstt intel intel-old mach64 mga \
 	neomagic newport nsc nv nvxbox openchrome pnozz \
 	r128 radeonhd rendition \
 	s3 s3virge savage siliconmotion sis suncg14 \
@@ -1307,17 +1303,13 @@ X11SRCDIR.xf86-input-${_i}?=	${X11SRCDIRMIT}/xf86-input-${_i}/dist
 X11SRCDIR.xf86-video-${_v}?=	${X11SRCDIRMIT}/xf86-video-${_v}/dist
 .endfor
 
-# Build the ati 6.x (UMS supported) or 7.x (KMS demanded) drivers
+# Only install the radeon firmware on DRM-happy systems.
 .if ${MACHINE_ARCH} == "x86_64" || ${MACHINE_ARCH} == "i386"
-MKX11RADEONKMS?=		yes
+MKRADEONFIRMWARE?=		yes
 .endif
-MKX11RADEONKMS?=		no
+MKRADEONFIRMWARE?=		no
 
-.if ${X11FLAVOUR} == "Xorg"
 X11DRI?=			yes
-.endif
-
-X11DRI?=			no
 X11LOADABLE?=			yes
 
 
@@ -1424,6 +1416,6 @@ _MKTARGET_YACC?=	${_MKMSG_YACC} ${.CURDIR:T}/${.TARGET}
 TARGETS+=	lintmanpages
 .endif
 
-TESTSBASE=	/usr/tests
+TESTSBASE=	/usr/tests${MLIBDIR:D/${MLIBDIR}}
 
 .endif	# !defined(_BSD_OWN_MK_)

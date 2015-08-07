@@ -1,4 +1,4 @@
-/*	$NetBSD: rndpseudo.c,v 1.31 2015/04/14 12:51:30 riastradh Exp $	*/
+/*	$NetBSD: rndpseudo.c,v 1.34 2015/04/21 12:57:03 riastradh Exp $	*/
 
 /*-
  * Copyright (c) 1997-2013 The NetBSD Foundation, Inc.
@@ -31,38 +31,37 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.31 2015/04/14 12:51:30 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.34 2015/04/21 12:57:03 riastradh Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_compat_netbsd.h"
 #endif
 
 #include <sys/param.h>
-#include <sys/ioctl.h>
+#include <sys/atomic.h>
+#include <sys/conf.h>
+#include <sys/cprng.h>
+#include <sys/cpu.h>
+#include <sys/evcnt.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
-#include <sys/select.h>
-#include <sys/poll.h>
-#include <sys/kmem.h>
-#include <sys/atomic.h>
-#include <sys/mutex.h>
-#include <sys/proc.h>
-#include <sys/kernel.h>
-#include <sys/conf.h>
-#include <sys/systm.h>
-#include <sys/vnode.h>
-#include <sys/pool.h>
+#include <sys/ioctl.h>
 #include <sys/kauth.h>
-#include <sys/cprng.h>
-#include <sys/cpu.h>
-#include <sys/stat.h>
+#include <sys/kernel.h>
+#include <sys/kmem.h>
+#include <sys/mutex.h>
 #include <sys/percpu.h>
-#include <sys/evcnt.h>
-
+#include <sys/poll.h>
+#include <sys/pool.h>
+#include <sys/proc.h>
 #include <sys/rnd.h>
 #include <sys/rndpool.h>
 #include <sys/rndsource.h>
+#include <sys/select.h>
+#include <sys/stat.h>
+#include <sys/systm.h>
+#include <sys/vnode.h>
 
 #include <dev/rnd_private.h>
 
@@ -88,7 +87,7 @@ __KERNEL_RCSID(0, "$NetBSD: rndpseudo.c,v 1.31 2015/04/14 12:51:30 riastradh Exp
  */
 #define	RND_TEMP_BUFFER_SIZE	512
 
-static pool_cache_t rnd_temp_buffer_cache;
+static pool_cache_t rnd_temp_buffer_cache __read_mostly;
 
 /*
  * Per-open state -- a lazily initialized CPRNG.
@@ -98,12 +97,12 @@ struct rnd_ctx {
 	bool			rc_hard;
 };
 
-static pool_cache_t rnd_ctx_cache;
+static pool_cache_t rnd_ctx_cache __read_mostly;
 
 /*
  * The per-CPU RNGs used for short requests
  */
-static percpu_t *percpu_urandom_cprng;
+static percpu_t *percpu_urandom_cprng __read_mostly;
 
 /* Used by ioconf.c to attach the rnd pseudo-device.  */
 void	rndattach(int);
@@ -168,9 +167,9 @@ rndpseudo_counter(void)
 
 	binuptime(&bt);
 	ret = bt.sec;
-	ret |= bt.sec >> 32;
-	ret |= bt.frac;
-	ret |= bt.frac >> 32;
+	ret ^= bt.sec >> 32;
+	ret ^= bt.frac;
+	ret ^= bt.frac >> 32;
 
 	return ret;
 }

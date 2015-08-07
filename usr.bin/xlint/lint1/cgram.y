@@ -1,5 +1,5 @@
 %{
-/* $NetBSD: cgram.y,v 1.68 2015/04/03 21:40:04 christos Exp $ */
+/* $NetBSD: cgram.y,v 1.70 2015/07/01 15:34:30 christos Exp $ */
 
 /*
  * Copyright (c) 1996 Christopher G. Demetriou.  All Rights Reserved.
@@ -35,7 +35,7 @@
 
 #include <sys/cdefs.h>
 #if defined(__RCSID) && !defined(lint)
-__RCSID("$NetBSD: cgram.y,v 1.68 2015/04/03 21:40:04 christos Exp $");
+__RCSID("$NetBSD: cgram.y,v 1.70 2015/07/01 15:34:30 christos Exp $");
 #endif
 
 #include <stdlib.h>
@@ -107,7 +107,7 @@ static inline void RESTORE(const char *file, size_t line)
 #endif
 %}
 
-%expect 78
+%expect 80
 
 %union {
 	int	y_int;
@@ -890,7 +890,7 @@ type_init_decls:
 	;
 
 notype_init_decl:
-	  notype_decl opt_asm_or_symbolrename {
+	notype_decl opt_asm_or_symbolrename {
 		idecl($1, 0, $2);
 		chksz($1);
 	  }
@@ -902,7 +902,7 @@ notype_init_decl:
 	;
 
 type_init_decl:
-	  type_decl opt_asm_or_symbolrename {
+	type_decl opt_asm_or_symbolrename {
 		idecl($1, 0, $2);
 		chksz($1);
 	  }
@@ -1210,7 +1210,7 @@ initializer:
 	;
 
 init_expr:
-	  expr				%prec T_COMMA {
+	| expr				%prec T_COMMA {
 		mkinit($1);
 	  }
 	| init_by_name init_expr	%prec T_COMMA
@@ -1921,8 +1921,10 @@ toicon(tnode_t *tn, int required)
 	/*
 	 * Abstract declarations are used inside expression. To free
 	 * the memory would be a fatal error.
+	 * We don't free blocks that are inside casts because these
+	 * will be used later to match types.
 	 */
-	if (dcs->d_ctx != ABSTRACT)
+	if (tn->tn_op != CON && dcs->d_ctx != ABSTRACT)
 		tfreeblk();
 
 	if ((t = v->v_tspec) == FLOAT || t == DOUBLE || t == LDOUBLE) {

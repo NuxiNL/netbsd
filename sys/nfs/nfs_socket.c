@@ -1,4 +1,4 @@
-/*	$NetBSD: nfs_socket.c,v 1.194 2015/04/03 20:01:07 rtr Exp $	*/
+/*	$NetBSD: nfs_socket.c,v 1.197 2015/07/15 03:28:55 manu Exp $	*/
 
 /*
  * Copyright (c) 1989, 1991, 1993, 1995
@@ -39,7 +39,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: nfs_socket.c,v 1.194 2015/04/03 20:01:07 rtr Exp $");
+__KERNEL_RCSID(0, "$NetBSD: nfs_socket.c,v 1.197 2015/07/15 03:28:55 manu Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_nfs.h"
@@ -66,6 +66,7 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_socket.c,v 1.194 2015/04/03 20:01:07 rtr Exp $")
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/kauth.h>
+#include <sys/time.h>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -243,7 +244,7 @@ nfs_connect(struct nfsmount *nmp, struct nfsreq *rep, struct lwp *l)
 			goto bad;
 		}
 	} else {
-		error = soconnect(so, nmp->nm_nam, l);
+		error = soconnect(so, mtod(nmp->nm_nam, struct sockaddr *), l);
 		if (error) {
 			sounlock(so);
 			goto bad;
@@ -349,11 +350,33 @@ nfs_reconnect(struct nfsreq *rep)
 	struct nfsreq *rp;
 	struct nfsmount *nmp = rep->r_nmp;
 	int error;
+	time_t before_ts;
 
 	nfs_disconnect(nmp);
+
+	/*
+	 * Force unmount: do not try to reconnect
+	 */
+	if (nmp->nm_iflag & NFSMNT_DISMNTFORCE)
+		return EIO;
+
+	before_ts = time_uptime;
 	while ((error = nfs_connect(nmp, rep, &lwp0)) != 0) {
 		if (error == EINTR || error == ERESTART)
 			return (EINTR);
+
+		if (rep->r_flags & R_SOFTTERM)
+			return (EIO);
+
+		/*
+		 * Soft mount can fail here, but not too fast: 
+		 * we want to make sure we at least honoured 
+		 * NFS timeout.
+		 */
+		if ((nmp->nm_flag & NFSMNT_SOFT) &&
+		    (time_uptime - before_ts > nmp->nm_timeo / NFS_HZ))
+			return (EIO);
+
 		kpause("nfscn2", false, hz, NULL);
 	}
 
@@ -439,7 +462,7 @@ nfs_safedisconnect(struct nfsmount *nmp)
 int
 nfs_send(struct socket *so, struct mbuf *nam, struct mbuf *top, struct nfsreq *rep, struct lwp *l)
 {
-	struct mbuf *sendnam;
+	struct sockaddr *sendnam;
 	int error, soflags, flags;
 
 	/* XXX nfs_doio()/nfs_request() calls with  rep->r_lwp == NULL */
@@ -463,7 +486,7 @@ nfs_send(struct socket *so, struct mbuf *nam, struct mbuf *top, struct nfsreq *r
 	if ((soflags & PR_CONNREQUIRED) || (so->so_state & SS_ISCONNECTED))
 		sendnam = NULL;
 	else
-		sendnam = nam;
+		sendnam = mtod(nam, struct sockaddr *);
 	if (so->so_type == SOCK_SEQPACKET)
 		flags = MSG_EOR;
 	else
@@ -800,7 +823,8 @@ nfs_timer(void *arg)
 			    m, NULL, NULL, NULL);
 			else
 			    error = (*so->so_proto->pr_usrreqs->pr_send)(so,
-			    m, nmp->nm_nam, NULL, NULL);
+				m, mtod(nmp->nm_nam, struct sockaddr *),
+				NULL, NULL);
 			if (error) {
 				if (NFSIGNORE_SOERROR(nmp->nm_soflags, error)) {
 #ifdef DEBUG
@@ -885,6 +909,12 @@ nfs_rcvlock(struct nfsmount *nmp, struct nfsreq *rep)
 
 	KASSERT(nmp == rep->r_nmp);
 
+	if (nmp->nm_flag & NFSMNT_SOFT)
+		slptimeo = nmp->nm_retry * nmp->nm_timeo;
+
+	if (nmp->nm_iflag & NFSMNT_DISMNTFORCE)
+		slptimeo = hz;
+
 	catch_p = (nmp->nm_flag & NFSMNT_INT) != 0;
 	mutex_enter(&nmp->nm_lock);
 	while (/* CONSTCOND */ true) {
@@ -913,11 +943,19 @@ nfs_rcvlock(struct nfsmount *nmp, struct nfsreq *rep)
 			break;
 		}
 		if (catch_p) {
-			cv_timedwait_sig(&nmp->nm_rcvcv, &nmp->nm_lock,
+			error = cv_timedwait_sig(&nmp->nm_rcvcv, &nmp->nm_lock,
 			    slptimeo);
 		} else {
-			cv_timedwait(&nmp->nm_rcvcv, &nmp->nm_lock,
+			error = cv_timedwait(&nmp->nm_rcvcv, &nmp->nm_lock,
 			    slptimeo);
+		}
+		if (error) {
+			if ((error == EWOULDBLOCK) &&
+			    (nmp->nm_flag & NFSMNT_SOFT)) {
+				error = EIO;
+				break;
+			}
+			error = 0;
 		}
 		if (catch_p) {
 			catch_p = false;

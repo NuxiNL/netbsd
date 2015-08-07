@@ -1,4 +1,4 @@
-/*	$NetBSD: private.h,v 1.39 2015/03/24 20:01:18 christos Exp $	*/
+/*	$NetBSD: private.h,v 1.42 2015/06/22 17:43:23 christos Exp $	*/
 
 #ifndef PRIVATE_H
 #define PRIVATE_H
@@ -53,6 +53,10 @@
 #ifndef HAVE_SETTIMEOFDAY
 #define HAVE_SETTIMEOFDAY	3
 #endif /* !defined HAVE_SETTIMEOFDAY */
+
+#ifndef HAVE_STRDUP
+#define HAVE_STRDUP 1
+#endif
 
 #ifndef HAVE_SYMLINK
 #define HAVE_SYMLINK		1
@@ -467,14 +471,6 @@ time_t time2posix_z(timezone_t __restrict, time_t) ATTRIBUTE_PURE;
 #endif
 
 /*
-** Private function declarations.
-*/
-
-char *		icatalloc(char * old, const char * new);
-char *		icpyalloc(const char * string);
-const char *	scheck(const char * string, const char * format);
-
-/*
 ** Finally, some convenience items.
 */
 
@@ -494,16 +490,21 @@ const char *	scheck(const char * string, const char * format);
 #define TYPE_SIGNED(type) (/*CONSTCOND*/((type) -1) < 0)
 #endif /* !defined TYPE_SIGNED */
 
+#define TWOS_COMPLEMENT(t) (/*CONSTCOND*/(t) ~ (t) 0 < 0)
+
+/* Max and min values of the integer type T, of which only the bottom
+   B bits are used, and where the highest-order used bit is considered
+   to be a sign bit if T is signed.  */
+#define MAXVAL(t, b) /*LINTED*/					\
+  ((t) (((t) 1 << ((b) - 1 - TYPE_SIGNED(t)))			\
+	- 1 + ((t) 1 << ((b) - 1 - TYPE_SIGNED(t)))))
+#define MINVAL(t, b)						\
+  ((t) (TYPE_SIGNED(t) ? - TWOS_COMPLEMENT(t) - MAXVAL(t, b) : 0))
+
 #ifdef LOCALTIME_IMPLEMENTATION
-/* The minimum and maximum finite time values.  */
-static time_t const time_t_min =
-  (TYPE_SIGNED(time_t)
-   ? (time_t) -1 << (int)(CHAR_BIT * sizeof (time_t) - 1)
-   : 0);
-static time_t const time_t_max =
-  (TYPE_SIGNED(time_t)
-   ? - (~ 0 < 0) - ((time_t) -1 << (int)(CHAR_BIT * sizeof (time_t) - 1))
-   : -1);
+/* The minimum and maximum finite time values.  This assumes no padding.  */
+static time_t const time_t_min = MINVAL(time_t, TYPE_BIT(time_t));
+static time_t const time_t_max = MAXVAL(time_t, TYPE_BIT(time_t));
 #endif
 
 #ifndef INT_STRLEN_MAXIMUM

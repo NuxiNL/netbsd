@@ -1,7 +1,10 @@
-#	$NetBSD: Makefile.serverlib,v 1.5 2014/12/08 06:33:26 mrg Exp $
+#	$NetBSD: Makefile.serverlib,v 1.8 2015/07/18 08:56:06 mrg Exp $
 
-NOLINT=         1
-NOPROFILE=      1
+# We can't use LIBISPRIVATE here as we need the ".so" installed.
+MKPICINSTALL:=	no
+MKLINT:=	no
+MKDEBUGLIB:=	no
+MKPROFILE:=	no
 
 .include <bsd.own.mk>		# for NETBSDSRCDIR
 .include <bsd.endian.mk>

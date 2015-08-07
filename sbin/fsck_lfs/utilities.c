@@ -1,4 +1,4 @@
-/* $NetBSD: utilities.c,v 1.35 2013/06/08 02:16:03 dholland Exp $	 */
+/* $NetBSD: utilities.c,v 1.39 2015/07/24 06:59:32 dholland Exp $	 */
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -89,7 +89,7 @@ reply(const char *question)
 	char c;
 
 	if (preen)
-		err(1, "INTERNAL ERROR: GOT TO reply()");
+		err(EXIT_FAILURE, "INTERNAL ERROR: GOT TO reply()");
 	persevere = !strcmp(question, "CONTINUE");
 	pwarn("\n");
 	if (!persevere && nflag) {
@@ -118,10 +118,10 @@ static void
 write_superblocks(void)
 {
 	if (debug)
-		pwarn("writing superblocks with lfs_idaddr = 0x%x\n",
-			(int)fs->lfs_idaddr);
-	lfs_writesuper(fs, fs->lfs_sboffs[0]);
-	lfs_writesuper(fs, fs->lfs_sboffs[1]);
+		pwarn("writing superblocks with lfs_idaddr = 0x%jx\n",
+			(uintmax_t)lfs_sb_getidaddr(fs));
+	lfs_writesuper(fs, lfs_sb_getsboff(fs, 0));
+	lfs_writesuper(fs, lfs_sb_getsboff(fs, 1));
 	fsmodified = 1;
 }
 
@@ -138,8 +138,8 @@ ckfini(int markclean)
 		}
 	}
 
-	if (!nflag && (fs->lfs_pflags & LFS_PF_CLEAN) == 0) {
-		fs->lfs_pflags |= LFS_PF_CLEAN;
+	if (!nflag && (lfs_sb_getpflags(fs) & LFS_PF_CLEAN) == 0) {
+		lfs_sb_setpflags(fs, lfs_sb_getpflags(fs) | LFS_PF_CLEAN);
 		fsmodified = 1;
 	}
 
@@ -156,7 +156,7 @@ ckfini(int markclean)
 		else if (!reply("MARK FILE SYSTEM CLEAN"))
 			markclean = 0;
 		if (markclean) {
-			fs->lfs_pflags |= LFS_PF_CLEAN;
+			lfs_sb_setpflags(fs, lfs_sb_getpflags(fs) | LFS_PF_CLEAN);
 			sbdirty();
 			write_superblocks();
 			if (!preen)
@@ -274,7 +274,7 @@ dofix(struct inodesc * idesc, const char *msg)
 		return (0);
 
 	default:
-		err(EEXIT, "UNKNOWN INODESC FIX MODE %d\n", idesc->id_fix);
+		err(EEXIT, "UNKNOWN INODESC FIX MODE %d", idesc->id_fix);
 	}
 	/* NOTREACHED */
 }

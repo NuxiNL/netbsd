@@ -87,21 +87,21 @@ cloudabi_sys_sock_accept(struct lwp *l,
     const struct cloudabi_sys_sock_accept_args *uap, register_t *retval)
 {
 	cloudabi_sockstat_t ss;
-	struct mbuf *name;
+	struct sockaddr_big name;
 	int error;
 
-	error = do_sys_accept(l, SCARG(uap, s), &name, retval, NULL, 0, 0);
+	name.sb_len = UCHAR_MAX;
+	error = do_sys_accept(l, SCARG(uap, s), (struct sockaddr *)&name,
+	    retval, NULL, 0, 0);
 	if (error != 0)
 		return (error == ENOTCAPABLE ? ENOTSOCK : error);
 
-	memset(&ss, '\0', sizeof(ss));
-	if (name != NULL) {
-		cloudabi_convert_sockaddr(mtod(name, void *), name->m_len,
-		    &ss.ss_peername);
-		m_free(name);
-	}
-	if (SCARG(uap, buf) != NULL)
+	if (SCARG(uap, buf) != NULL) {
+		memset(&ss, '\0', sizeof(ss));
+		cloudabi_convert_sockaddr((const struct sockaddr *)&name,
+		    name.sb_len, &ss.ss_peername);
 		error = copyout(&ss, SCARG(uap, buf), sizeof(ss));
+	}
 	return (error);
 }
 
@@ -330,7 +330,7 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
     const struct cloudabi_sys_sock_stat_get_args *uap, register_t *retval)
 {
 	cloudabi_sockstat_t ss;
-	struct mbuf *name;
+	struct sockaddr_big name;
 	struct socket *so;
 	int error;
 
@@ -342,23 +342,22 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
 	solock(so);
 
 	/* Set ss_sockname. */
-	name = m_getclr(M_WAIT, MT_SONAME);
-	MCLAIM(name, so->so_mowner);
-	error = so->so_proto->pr_usrreqs->pr_sockaddr(so, name);
+	name.sb_len = UCHAR_MAX;
+	error = so->so_proto->pr_usrreqs->pr_sockaddr(so,
+	    (struct sockaddr *)&name);
 	if (error == 0)
-		cloudabi_convert_sockaddr(mtod(name, void *), name->m_len,
-		    &ss.ss_sockname);
-	m_free(name);
+		cloudabi_convert_sockaddr((const struct sockaddr *)&name,
+		    name.sb_len, &ss.ss_sockname);
 
 	/* Set ss_peername. */
 	if ((so->so_state & SS_ISCONNECTED) != 0) {
-		name = m_getclr(M_WAIT, MT_SONAME);
-		MCLAIM(name, so->so_mowner);
-		error = so->so_proto->pr_usrreqs->pr_peeraddr(so, name);
+		name.sb_len = UCHAR_MAX;
+		error = so->so_proto->pr_usrreqs->pr_peeraddr(so,
+		    (struct sockaddr *)&name);
 		if (error == 0)
-			cloudabi_convert_sockaddr(mtod(name, void *),
-			    name->m_len, &ss.ss_peername);
-		m_free(name);
+			cloudabi_convert_sockaddr(
+			    (const struct sockaddr *)&name,
+			    name.sb_len, &ss.ss_peername);
 	}
 
 	/* Set ss_error. */

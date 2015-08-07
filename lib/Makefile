@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.221 2015/04/17 22:17:23 mrg Exp $
+#	$NetBSD: Makefile,v 1.226 2015/07/08 01:08:24 matt Exp $
 #	from: @(#)Makefile	5.25.1.1 (Berkeley) 5/7/91
 
 .include <bsd.own.mk>
@@ -33,7 +33,7 @@ SUBDIR+=	libarch \
 SUBDIR+=	libkern
 .endif
 
-.if (${MACHINE_CPU} == "arm")
+.if (${MACHINE_CPU} == "arm" || ${MACHINE_CPU} == "aarch64")
 LIBC_MACHINE_ARCH?=${MACHINE_ARCH}
 .if empty(LIBC_MACHINE_ARCH:M*hf*)
 SUBDIR+=	libc_vfp
@@ -64,6 +64,21 @@ SUBDIR+=	../external/bsd/sljit/lib
 SUBDIR+=	libbpfjit
 .endif
 
+.if ${MKDTRACE} != "no"
+SUBDIR+=        ../external/cddl/osnet/lib/libdtrace
+.endif
+
+.if ${MKDTRACE} != "no" || ${MKCTF} != "no"
+SUBDIR+=        ../external/cddl/osnet/lib/libctf
+.endif
+
+.if (${MKZFS} != "no")
+SUBDIR+=        ../external/cddl/osnet/lib/libavl
+SUBDIR+=        ../external/cddl/osnet/lib/libnvpair
+SUBDIR+=        ../external/cddl/osnet/lib/libumem
+SUBDIR+=        ../external/cddl/osnet/lib/libuutil
+.endif
+
 SUBDIR+=	../external/mit/expat/lib
 
 SUBDIR+=	../external/public-domain/sqlite/lib
@@ -73,6 +88,8 @@ SUBDIR+=	../gnu/lib/libmalloc
 .if (${MKGCC} != "no")
 SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libobjc
 SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libgomp
+SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libmudflap
+SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libmudflapth
 # Should probably move GMP, MPFR and MPC builds into the GCC >= 4.5
 # specific build area, but we get better parallelism this way.
 # We don't build compat versions of these.
@@ -127,6 +144,11 @@ SUBDIR+=	../external/bsd/file/lib	# depends on libz
 SUBDIR+=	../external/bsd/iscsi/lib	# depends on libpthread
 .endif
 
+.if (${MKZFS} != "no")
+SUBDIR+=        ../external/cddl/osnet/lib/libzfs
+SUBDIR+=        ../external/cddl/osnet/lib/libzpool
+.endif
+
 .if (${MKLVM} != "no")
 SUBDIR+=	../external/gpl2/lvm2/lib	# depends on libprop
 .endif
@@ -143,13 +165,14 @@ SUBDIR+=	../external/bsd/libc++
 SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libstdc++-v3
 SUBDIR+=	../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libsupc++
 .endif
+
+#==================== 2nd library dependency barrier ====================
+SUBDIR+=	.WAIT
+
 SANITIZER_DIR=../external/gpl3/${EXTERNAL_GCC_SUBDIR}/lib/libasan
 .if exists(${SANITIZER_DIR})
 SUBDIR+=	${SANITIZER_DIR}
 .endif
-
-#==================== 2nd library dependency barrier ====================
-SUBDIR+=	.WAIT
 
 SUBDIR+=	../external/bsd/libarchive/lib	# depends on libxz
 

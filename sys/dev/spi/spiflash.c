@@ -1,4 +1,4 @@
-/* $NetBSD: spiflash.c,v 1.16 2014/10/11 13:56:01 mlelstv Exp $ */
+/* $NetBSD: spiflash.c,v 1.18 2015/07/22 10:07:59 ryo Exp $ */
 
 /*-
  * Copyright (c) 2006 Urbana-Champaign Independent Media Center.
@@ -42,7 +42,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: spiflash.c,v 1.16 2014/10/11 13:56:01 mlelstv Exp $");
+__KERNEL_RCSID(0, "$NetBSD: spiflash.c,v 1.18 2015/07/22 10:07:59 ryo Exp $");
 
 #include <sys/param.h>
 #include <sys/conf.h>
@@ -166,7 +166,9 @@ const struct cdevsw spiflash_cdevsw = {
 	.d_flag = D_DISK,
 };
 
-static struct dkdriver spiflash_dkdriver = { spiflash_strategy, NULL };
+static struct dkdriver spiflash_dkdriver = {
+	.d_strategy = spiflash_strategy
+};
 
 spiflash_handle_t
 spiflash_attach_mi(const struct spiflash_hw_if *hw, void *cookie,
@@ -679,6 +681,7 @@ spiflash_common_read(spiflash_handle_t sc, size_t start, size_t size,
 			return rv;
 		}
 
+		data += cnt;
 		start += cnt;
 		size -= cnt;
 	}

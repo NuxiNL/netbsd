@@ -1,4 +1,4 @@
-/*	$NetBSD: lfs_alloc.c,v 1.119 2013/07/28 01:25:05 dholland Exp $	*/
+/*	$NetBSD: lfs_alloc.c,v 1.123 2015/07/24 06:59:32 dholland Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2002, 2003, 2007 The NetBSD Foundation, Inc.
@@ -60,7 +60,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: lfs_alloc.c,v 1.119 2013/07/28 01:25:05 dholland Exp $");
+__KERNEL_RCSID(0, "$NetBSD: lfs_alloc.c,v 1.123 2015/07/24 06:59:32 dholland Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_quota.h"
@@ -128,23 +128,23 @@ lfs_extend_ifile(struct lfs *fs, kauth_cred_t cred)
 	vp = fs->lfs_ivnode;
 	ip = VTOI(vp);
 	blkno = lfs_lblkno(fs, ip->i_size);
-	if ((error = lfs_balloc(vp, ip->i_size, fs->lfs_bsize, cred, 0,
+	if ((error = lfs_balloc(vp, ip->i_size, lfs_sb_getbsize(fs), cred, 0,
 				&bp)) != 0) {
 		return (error);
 	}
-	ip->i_size += fs->lfs_bsize;
+	ip->i_size += lfs_sb_getbsize(fs);
 	ip->i_ffs1_size = ip->i_size;
 	uvm_vnp_setsize(vp, ip->i_size);
 
-	maxino = ((ip->i_size >> fs->lfs_bshift) - fs->lfs_cleansz -
-		  fs->lfs_segtabsz) * fs->lfs_ifpb;
+	maxino = ((ip->i_size >> lfs_sb_getbshift(fs)) - lfs_sb_getcleansz(fs) -
+		  lfs_sb_getsegtabsz(fs)) * lfs_sb_getifpb(fs);
 	fs->lfs_ino_bitmap = (lfs_bm_t *)
 		realloc(fs->lfs_ino_bitmap, ((maxino + BMMASK) >> BMSHIFT) *
 			sizeof(lfs_bm_t), M_SEGMENT, M_WAITOK);
 	KASSERT(fs->lfs_ino_bitmap != NULL);
 
-	i = (blkno - fs->lfs_segtabsz - fs->lfs_cleansz) *
-		fs->lfs_ifpb;
+	i = (blkno - lfs_sb_getsegtabsz(fs) - lfs_sb_getcleansz(fs)) *
+		lfs_sb_getifpb(fs);
 
 	/*
 	 * We insert the new inodes at the head of the free list.
@@ -155,10 +155,10 @@ lfs_extend_ifile(struct lfs *fs, kauth_cred_t cred)
 	LFS_GET_HEADFREE(fs, cip, cbp, &oldlast);
 	LFS_PUT_HEADFREE(fs, cip, cbp, i);
 #ifdef DIAGNOSTIC
-	if (fs->lfs_freehd == LFS_UNUSED_INUM)
+	if (lfs_sb_getfreehd(fs) == LFS_UNUSED_INUM)
 		panic("inode 0 allocated [2]");
 #endif /* DIAGNOSTIC */
-	xmax = i + fs->lfs_ifpb;
+	xmax = i + lfs_sb_getifpb(fs);
 
 	if (fs->lfs_version == 1) {
 		for (ifp_v1 = (IFILE_V1 *)bp->b_data; i < xmax; ++ifp_v1) {
@@ -191,14 +191,12 @@ lfs_extend_ifile(struct lfs *fs, kauth_cred_t cred)
 /* VOP_BWRITE 2i times */
 int
 lfs_valloc(struct vnode *pvp, int mode, kauth_cred_t cred,
-    struct vnode **vpp)
+    ino_t *ino, int *gen)
 {
 	struct lfs *fs;
 	struct buf *bp, *cbp;
 	struct ifile *ifp;
-	ino_t new_ino;
 	int error;
-	int new_gen;
 	CLEANERINFO *cip;
 
 	fs = VTOI(pvp)->i_lfs;
@@ -210,38 +208,38 @@ lfs_valloc(struct vnode *pvp, int mode, kauth_cred_t cred,
 	lfs_seglock(fs, SEGM_PROT);
 
 	/* Get the head of the freelist. */
-	LFS_GET_HEADFREE(fs, cip, cbp, &new_ino);
-	KASSERT(new_ino != LFS_UNUSED_INUM && new_ino != LFS_IFILE_INUM);
+	LFS_GET_HEADFREE(fs, cip, cbp, ino);
+	KASSERT(*ino != LFS_UNUSED_INUM && *ino != LFS_IFILE_INUM);
 
-	DLOG((DLOG_ALLOC, "lfs_valloc: allocate inode %lld\n",
-	     (long long)new_ino));
+	DLOG((DLOG_ALLOC, "lfs_valloc: allocate inode %" PRId64 "\n",
+	     *ino));
 
 	/*
 	 * Remove the inode from the free list and write the new start
 	 * of the free list into the superblock.
 	 */
-	CLR_BITMAP_FREE(fs, new_ino);
-	LFS_IENTRY(ifp, fs, new_ino, bp);
+	CLR_BITMAP_FREE(fs, *ino);
+	LFS_IENTRY(ifp, fs, *ino, bp);
 	if (ifp->if_daddr != LFS_UNUSED_DADDR)
-		panic("lfs_valloc: inuse inode %llu on the free list",
-		    (unsigned long long)new_ino);
+		panic("lfs_valloc: inuse inode %" PRId64 " on the free list",
+		    *ino);
 	LFS_PUT_HEADFREE(fs, cip, cbp, ifp->if_nextfree);
-	DLOG((DLOG_ALLOC, "lfs_valloc: headfree %lld -> %lld\n",
-	     (long long)new_ino, (long long)ifp->if_nextfree));
+	DLOG((DLOG_ALLOC, "lfs_valloc: headfree %" PRId64 " -> %u\n",
+	     *ino, ifp->if_nextfree));
 
-	new_gen = ifp->if_version; /* version was updated by vfree */
+	*gen = ifp->if_version; /* version was updated by vfree */
 	brelse(bp, 0);
 
 	/* Extend IFILE so that the next lfs_valloc will succeed. */
-	if (fs->lfs_freehd == LFS_UNUSED_INUM) {
+	if (lfs_sb_getfreehd(fs) == LFS_UNUSED_INUM) {
 		if ((error = lfs_extend_ifile(fs, cred)) != 0) {
-			LFS_PUT_HEADFREE(fs, cip, cbp, new_ino);
+			LFS_PUT_HEADFREE(fs, cip, cbp, *ino);
 			lfs_segunlock(fs);
 			return error;
 		}
 	}
 #ifdef DIAGNOSTIC
-	if (fs->lfs_freehd == LFS_UNUSED_INUM)
+	if (lfs_sb_getfreehd(fs) == LFS_UNUSED_INUM)
 		panic("inode 0 allocated [3]");
 #endif /* DIAGNOSTIC */
 
@@ -249,98 +247,58 @@ lfs_valloc(struct vnode *pvp, int mode, kauth_cred_t cred,
 	mutex_enter(&lfs_lock);
 	fs->lfs_fmod = 1;
 	mutex_exit(&lfs_lock);
-	++fs->lfs_nfiles;
+	lfs_sb_addnfiles(fs, 1);
 
 	lfs_segunlock(fs);
 
-	return lfs_ialloc(fs, pvp, new_ino, new_gen, vpp);
+	return 0;
 }
 
 /*
- * Finish allocating a new inode, given an inode and generation number.
+ * Allocate a new inode with given inode number and version.
  */
 int
-lfs_ialloc(struct lfs *fs, struct vnode *pvp, ino_t new_ino, int new_gen,
-	   struct vnode **vpp)
+lfs_valloc_fixed(struct lfs *fs, ino_t ino, int vers)
 {
-	struct inode *ip;
-	struct vnode *vp;
+	IFILE *ifp;
+	struct buf *bp, *cbp;
+	ino_t tino, oldnext;
+	CLEANERINFO *cip;
 
-	ASSERT_NO_SEGLOCK(fs);
-
-	vp = *vpp;
-	mutex_enter(&ulfs_hashlock);
-	/* Create an inode to associate with the vnode. */
-	lfs_vcreate(pvp->v_mount, new_ino, vp);
-
-	ip = VTOI(vp);
-	mutex_enter(&lfs_lock);
-	LFS_SET_UINO(ip, IN_CHANGE);
-	mutex_exit(&lfs_lock);
-	/* on-disk structure has been zeroed out by lfs_vcreate */
-	ip->i_din.ffs1_din->di_inumber = new_ino;
-
-	/* Note no blocks yet */
-	ip->i_lfs_hiblk = -1;
-
-	/* Set a new generation number for this inode. */
-	if (new_gen) {
-		ip->i_gen = new_gen;
-		ip->i_ffs1_gen = new_gen;
+	/* If the Ifile is too short to contain this inum, extend it */
+	while (VTOI(fs->lfs_ivnode)->i_size <= (ino /
+		lfs_sb_getifpb(fs) + lfs_sb_getcleansz(fs) + lfs_sb_getsegtabsz(fs))
+		<< lfs_sb_getbshift(fs)) {
+		lfs_extend_ifile(fs, NOCRED);
 	}
 
-	/* Insert into the inode hash table. */
-	ulfs_ihashins(ip);
-	mutex_exit(&ulfs_hashlock);
+	LFS_IENTRY(ifp, fs, ino, bp);
+	oldnext = ifp->if_nextfree;
+	ifp->if_version = vers;
+	brelse(bp, 0);
 
-	ulfs_vinit(vp->v_mount, lfs_specop_p, lfs_fifoop_p, vpp);
-	vp = *vpp;
-	ip = VTOI(vp);
+	LFS_GET_HEADFREE(fs, cip, cbp, &ino);
+	if (ino) {
+		LFS_PUT_HEADFREE(fs, cip, cbp, oldnext);
+	} else {
+		tino = ino;
+		while (1) {
+			LFS_IENTRY(ifp, fs, tino, bp);
+			if (ifp->if_nextfree == ino ||
+			    ifp->if_nextfree == LFS_UNUSED_INUM)
+				break;
+			tino = ifp->if_nextfree;
+			brelse(bp, 0);
+		}
+		if (ifp->if_nextfree == LFS_UNUSED_INUM) {
+			brelse(bp, 0);
+			return ENOENT;
+		}
+		ifp->if_nextfree = oldnext;
+		LFS_BWRITE_LOG(bp);
+	}
 
-	memset(ip->i_lfs_fragsize, 0, ULFS_NDADDR * sizeof(*ip->i_lfs_fragsize));
-
-	uvm_vnp_setsize(vp, 0);
-	lfs_mark_vnode(vp);
-	genfs_node_init(vp, &lfs_genfsops);
-	vref(ip->i_devvp);
-	return (0);
-}
-
-/* Create a new vnode/inode pair and initialize what fields we can. */
-void
-lfs_vcreate(struct mount *mp, ino_t ino, struct vnode *vp)
-{
-	struct inode *ip;
-	struct ulfs1_dinode *dp;
-	struct ulfsmount *ump;
-
-	/* Get a pointer to the private mount structure. */
-	ump = VFSTOULFS(mp);
-
-	ASSERT_NO_SEGLOCK(ump->um_lfs);
-
-	/* Initialize the inode. */
-	ip = pool_get(&lfs_inode_pool, PR_WAITOK);
-	memset(ip, 0, sizeof(*ip));
-	dp = pool_get(&lfs_dinode_pool, PR_WAITOK);
-	memset(dp, 0, sizeof(*dp));
-	ip->inode_ext.lfs = pool_get(&lfs_inoext_pool, PR_WAITOK);
-	memset(ip->inode_ext.lfs, 0, sizeof(*ip->inode_ext.lfs));
-	vp->v_data = ip;
-	ip->i_din.ffs1_din = dp;
-	ip->i_ump = ump;
-	ip->i_vnode = vp;
-	ip->i_devvp = ump->um_devvp;
-	ip->i_dev = ump->um_dev;
-	ip->i_number = dp->di_inumber = ino;
-	ip->i_lfs = ump->um_lfs;
-	ip->i_lfs_effnblks = 0;
-	SPLAY_INIT(&ip->i_lfs_lbtree);
-	ip->i_lfs_nbtree = 0;
-	LIST_INIT(&ip->i_lfs_segdhd);
-#if defined(LFS_QUOTA) || defined(LFS_QUOTA2)
-	ulfsquota_init(ip);
-#endif
+	return 0;
 }
 
 #if 0
@@ -353,8 +311,8 @@ lfs_last_alloc_ino(struct lfs *fs)
 {
 	ino_t ino, maxino;
 
-	maxino = ((fs->lfs_ivnode->v_size >> fs->lfs_bshift) -
-		  fs->lfs_cleansz - fs->lfs_segtabsz) * fs->lfs_ifpb;
+	maxino = ((fs->lfs_ivnode->v_size >> lfs_sb_getbshift(fs)) -
+		  lfs_sb_getcleansz(fs) - lfs_sb_getsegtabsz(fs)) * fs->lfs_ifpb;
 	for (ino = maxino - 1; ino > LFS_UNUSED_INUM; --ino) {
 		if (ISSET_BITMAP_FREE(fs, ino) == 0)
 			break;
@@ -372,7 +330,7 @@ lfs_freelist_prev(struct lfs *fs, ino_t ino)
 {
 	ino_t tino, bound, bb, freehdbb;
 
-	if (fs->lfs_freehd == LFS_UNUSED_INUM)	 /* No free inodes at all */
+	if (lfs_sb_getfreehd(fs) == LFS_UNUSED_INUM)	 /* No free inodes at all */
 		return LFS_UNUSED_INUM;
 
 	/* Search our own word first */
@@ -388,7 +346,7 @@ lfs_freelist_prev(struct lfs *fs, ino_t ino)
 	 * Find a word with a free inode in it.  We have to be a bit
 	 * careful here since ino_t is unsigned.
 	 */
-	freehdbb = (fs->lfs_freehd >> BMSHIFT);
+	freehdbb = (lfs_sb_getfreehd(fs) >> BMSHIFT);
 	for (bb = (ino >> BMSHIFT) - 1; bb >= freehdbb && bb > 0; --bb)
 		if (fs->lfs_ino_bitmap[bb])
 			break;
@@ -449,7 +407,7 @@ lfs_vfree(struct vnode *vp, ino_t ino, int mode)
 		wakeup(&fs->lfs_dirvcount);
 		wakeup(&lfs_dirvcount);
 		mutex_exit(&lfs_lock);
-		lfs_vunref(vp);
+		vrele(vp);
 
 		/*
 		 * If this inode is not going to be written any more, any
@@ -570,7 +528,7 @@ lfs_vfree(struct vnode *vp, ino_t ino, int mode)
 	mutex_enter(&lfs_lock);
 	fs->lfs_fmod = 1;
 	mutex_exit(&lfs_lock);
-	--fs->lfs_nfiles;
+	lfs_sb_subnfiles(fs, 1);
 
 	lfs_segunlock(fs);
 
@@ -595,16 +553,16 @@ lfs_order_freelist(struct lfs *fs)
 	ASSERT_NO_SEGLOCK(fs);
 	lfs_seglock(fs, SEGM_PROT);
 
-	maxino = ((fs->lfs_ivnode->v_size >> fs->lfs_bshift) -
-		  fs->lfs_cleansz - fs->lfs_segtabsz) * fs->lfs_ifpb;
-	fs->lfs_ino_bitmap = (lfs_bm_t *)
+	maxino = ((fs->lfs_ivnode->v_size >> lfs_sb_getbshift(fs)) -
+		  lfs_sb_getcleansz(fs) - lfs_sb_getsegtabsz(fs)) * lfs_sb_getifpb(fs);
+	fs->lfs_ino_bitmap =
 		malloc(((maxino + BMMASK) >> BMSHIFT) * sizeof(lfs_bm_t),
 		       M_SEGMENT, M_WAITOK | M_ZERO);
 	KASSERT(fs->lfs_ino_bitmap != NULL);
 
 	firstino = lastino = LFS_UNUSED_INUM;
 	for (ino = 0; ino < maxino; ino++) {
-		if (ino % fs->lfs_ifpb == 0)
+		if (ino % lfs_sb_getifpb(fs) == 0)
 			LFS_IENTRY(ifp, fs, ino, bp);
 		else
 			++ifp;
@@ -648,7 +606,7 @@ lfs_order_freelist(struct lfs *fs)
 			SET_BITMAP_FREE(fs, ino);
 		}
 
-		if ((ino + 1) % fs->lfs_ifpb == 0)
+		if ((ino + 1) % lfs_sb_getifpb(fs) == 0)
 			brelse(bp, 0);
 	}
 

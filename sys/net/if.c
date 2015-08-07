@@ -1,4 +1,4 @@
-/*	$NetBSD: if.c,v 1.310 2015/04/20 10:19:54 roy Exp $	*/
+/*	$NetBSD: if.c,v 1.317 2015/07/17 02:21:08 ozaki-r Exp $	*/
 
 /*-
  * Copyright (c) 1999, 2000, 2001, 2008 The NetBSD Foundation, Inc.
@@ -90,7 +90,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if.c,v 1.310 2015/04/20 10:19:54 roy Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if.c,v 1.317 2015/07/17 02:21:08 ozaki-r Exp $");
 
 #if defined(_KERNEL_OPT)
 #include "opt_inet.h"
@@ -169,15 +169,12 @@ static uint64_t			index_gen;
 static kmutex_t			index_gen_mtx;
 static kmutex_t			if_clone_mtx;
 
-static struct ifaddr **		ifnet_addrs = NULL;
-
 struct ifnet *lo0ifp;
 int	ifqmaxlen = IFQ_MAXLEN;
 
 static int	if_rt_walktree(struct rtentry *, void *);
 
 static struct if_clone *if_clone_lookup(const char *, int *);
-static int	if_clone_list(struct if_clonereq *);
 
 static LIST_HEAD(, if_clone) if_cloners = LIST_HEAD_INITIALIZER(if_cloners);
 static int if_cloners_count;
@@ -239,7 +236,8 @@ ifinit(void)
 	sysctl_net_pktq_setup(NULL, PF_INET);
 #endif
 #ifdef INET6
-	sysctl_net_pktq_setup(NULL, PF_INET6);
+	if (in6_present)
+		sysctl_net_pktq_setup(NULL, PF_INET6);
 #endif
 
 	if_listener = kauth_listen_scope(KAUTH_SCOPE_NETWORK,
@@ -407,8 +405,7 @@ static void
 if_sadl_setrefs(struct ifnet *ifp, struct ifaddr *ifa)
 {
 	const struct sockaddr_dl *sdl;
-	ifnet_addrs[ifp->if_index] = ifa;
-	ifaref(ifa);
+
 	ifp->if_dl = ifa;
 	ifaref(ifa);
 	sdl = satosdl(ifa->ifa_addr);
@@ -452,8 +449,6 @@ if_deactivate_sadl(struct ifnet *ifp)
 
 	ifp->if_sadl = NULL;
 
-	ifnet_addrs[ifp->if_index] = NULL;
-	ifafree(ifa);
 	ifp->if_dl = NULL;
 	ifafree(ifa);
 }
@@ -484,15 +479,13 @@ if_free_sadl(struct ifnet *ifp)
 	struct ifaddr *ifa;
 	int s;
 
-	ifa = ifnet_addrs[ifp->if_index];
+	ifa = ifp->if_dl;
 	if (ifa == NULL) {
 		KASSERT(ifp->if_sadl == NULL);
-		KASSERT(ifp->if_dl == NULL);
 		return;
 	}
 
 	KASSERT(ifp->if_sadl != NULL);
-	KASSERT(ifp->if_dl != NULL);
 
 	s = splnet();
 	rtinit(ifa, RTM_DELETE, 0);
@@ -547,29 +540,16 @@ if_getindex(ifnet_t *ifp)
 	}
 skip:
 	/*
-	 * We have some arrays that should be indexed by if_index.
-	 * since if_index will grow dynamically, they should grow too.
-	 *	struct ifadd **ifnet_addrs
-	 *	struct ifnet **ifindex2ifnet
+	 * ifindex2ifnet is indexed by if_index. Since if_index will
+	 * grow dynamically, it should grow too.
 	 */
-	if (ifnet_addrs == NULL || ifindex2ifnet == NULL ||
-	    ifp->if_index >= if_indexlim) {
+	if (ifindex2ifnet == NULL || ifp->if_index >= if_indexlim) {
 		size_t m, n, oldlim;
 		void *q;
 
 		oldlim = if_indexlim;
 		while (ifp->if_index >= if_indexlim)
 			if_indexlim <<= 1;
-
-		/* grow ifnet_addrs */
-		m = oldlim * sizeof(struct ifaddr *);
-		n = if_indexlim * sizeof(struct ifaddr *);
-		q = malloc(n, M_IFADDR, M_WAITOK|M_ZERO);
-		if (ifnet_addrs != NULL) {
-			memcpy(q, ifnet_addrs, m);
-			free(ifnet_addrs, M_IFADDR);
-		}
-		ifnet_addrs = (struct ifaddr **)q;
 
 		/* grow ifindex2ifnet */
 		m = oldlim * sizeof(struct ifnet *);
@@ -983,20 +963,23 @@ if_rt_walktree(struct rtentry *rt, void *v)
 {
 	struct ifnet *ifp = (struct ifnet *)v;
 	int error;
+	struct rtentry *retrt;
 
 	if (rt->rt_ifp != ifp)
 		return 0;
 
 	/* Delete the entry. */
-	++rt->rt_refcnt;
 	error = rtrequest(RTM_DELETE, rt_getkey(rt), rt->rt_gateway,
-	    rt_mask(rt), rt->rt_flags, NULL);
-	KASSERT((rt->rt_flags & RTF_UP) == 0);
-	rt->rt_ifp = NULL;
-	rtfree(rt);
-	if (error != 0)
+	    rt_mask(rt), rt->rt_flags, &retrt);
+	if (error == 0) {
+		KASSERT(retrt == rt);
+		KASSERT((retrt->rt_flags & RTF_UP) == 0);
+		retrt->rt_ifp = NULL;
+		rtfree(retrt);
+	} else {
 		printf("%s: warning: unable to delete rtentry @ %p, "
 		    "error = %d\n", ifp->if_xname, rt, error);
+	}
 	return ERESTART;
 }
 
@@ -1116,24 +1099,24 @@ if_clone_detach(struct if_clone *ifc)
 /*
  * Provide list of interface cloners to userspace.
  */
-static int
-if_clone_list(struct if_clonereq *ifcr)
+int
+if_clone_list(int buf_count, char *buffer, int *total)
 {
 	char outbuf[IFNAMSIZ], *dst;
 	struct if_clone *ifc;
 	int count, error = 0;
 
-	ifcr->ifcr_total = if_cloners_count;
-	if ((dst = ifcr->ifcr_buffer) == NULL) {
+	*total = if_cloners_count;
+	if ((dst = buffer) == NULL) {
 		/* Just asking how many there are. */
 		return 0;
 	}
 
-	if (ifcr->ifcr_count < 0)
+	if (buf_count < 0)
 		return EINVAL;
 
-	count = (if_cloners_count < ifcr->ifcr_count) ?
-	    if_cloners_count : ifcr->ifcr_count;
+	count = (if_cloners_count < buf_count) ?
+	    if_cloners_count : buf_count;
 
 	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
 	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
@@ -1260,8 +1243,9 @@ ifa_ifwithnet(const struct sockaddr *addr)
 		sdl = satocsdl(addr);
 		if (sdl->sdl_index && sdl->sdl_index < if_indexlim &&
 		    ifindex2ifnet[sdl->sdl_index] &&
-		    ifindex2ifnet[sdl->sdl_index]->if_output != if_nulloutput)
-			return ifnet_addrs[sdl->sdl_index];
+		    ifindex2ifnet[sdl->sdl_index]->if_output != if_nulloutput) {
+			return ifindex2ifnet[sdl->sdl_index]->if_dl;
+		}
 	}
 #ifdef NETATALK
 	if (af == AF_APPLETALK) {
@@ -1422,9 +1406,8 @@ void
 if_link_state_change(struct ifnet *ifp, int link_state)
 {
 	int s;
-#if defined(DEBUG) || defined(INET6)
 	int old_link_state;
-#endif
+	struct domain *dp;
 
 	s = splnet();
 	if (ifp->if_link_state == link_state) {
@@ -1432,9 +1415,7 @@ if_link_state_change(struct ifnet *ifp, int link_state)
 		return;
 	}
 
-#if defined(DEBUG) || defined(INET6)
 	old_link_state = ifp->if_link_state;
-#endif
 	ifp->if_link_state = link_state;
 #ifdef DEBUG
 	log(LOG_DEBUG, "%s: link state %s (was %s)\n", ifp->if_xname,
@@ -1446,20 +1427,24 @@ if_link_state_change(struct ifnet *ifp, int link_state)
 		"UNKNOWN");
 #endif
 
-#ifdef INET6
 	/*
 	 * When going from UNKNOWN to UP, we need to mark existing
-	 * IPv6 addresses as tentative and restart DAD as we may have
+	 * addresses as tentative and restart DAD as we may have
 	 * erroneously not found a duplicate.
 	 *
 	 * This needs to happen before rt_ifmsg to avoid a race where
 	 * listeners would have an address and expect it to work right
 	 * away.
 	 */
-	if (in6_present && link_state == LINK_STATE_UP &&
+	if (link_state == LINK_STATE_UP &&
 	    old_link_state == LINK_STATE_UNKNOWN)
-		in6_if_link_down(ifp);
-#endif
+	{
+		DOMAIN_FOREACH(dp) {
+			if (dp->dom_if_link_state_change != NULL)
+				dp->dom_if_link_state_change(ifp,
+				    LINK_STATE_DOWN);
+		}
+	}
 
 	/* Notify that the link state has changed. */
 	rt_ifmsg(ifp);
@@ -1469,14 +1454,10 @@ if_link_state_change(struct ifnet *ifp, int link_state)
 		carp_carpdev_state(ifp);
 #endif
 
-#ifdef INET6
-	if (in6_present) {
-		if (link_state == LINK_STATE_DOWN)
-			in6_if_link_down(ifp);
-		else if (link_state == LINK_STATE_UP)
-			in6_if_link_up(ifp);
+	DOMAIN_FOREACH(dp) {
+		if (dp->dom_if_link_state_change != NULL)
+			dp->dom_if_link_state_change(ifp, link_state);
 	}
-#endif
 
 	splx(s);
 }
@@ -1542,6 +1523,7 @@ void
 if_down(struct ifnet *ifp)
 {
 	struct ifaddr *ifa;
+	struct domain *dp;
 
 	ifp->if_flags &= ~IFF_UP;
 	nanotime(&ifp->if_lastchange);
@@ -1553,10 +1535,10 @@ if_down(struct ifnet *ifp)
 		carp_carpdev_state(ifp);
 #endif
 	rt_ifmsg(ifp);
-#ifdef INET6
-	if (in6_present)
-		in6_if_down(ifp);
-#endif
+	DOMAIN_FOREACH(dp) {
+		if (dp->dom_if_down)
+			dp->dom_if_down(ifp);
+	}
 }
 
 /*
@@ -1570,6 +1552,7 @@ if_up(struct ifnet *ifp)
 #ifdef notyet
 	struct ifaddr *ifa;
 #endif
+	struct domain *dp;
 
 	ifp->if_flags |= IFF_UP;
 	nanotime(&ifp->if_lastchange);
@@ -1583,10 +1566,10 @@ if_up(struct ifnet *ifp)
 		carp_carpdev_state(ifp);
 #endif
 	rt_ifmsg(ifp);
-#ifdef INET6
-	if (in6_present)
-		in6_if_up(ifp);
-#endif
+	DOMAIN_FOREACH(dp) {
+		if (dp->dom_if_up)
+			dp->dom_if_up(ifp);
+	}
 }
 
 /*
@@ -2005,7 +1988,11 @@ doifioctl(struct socket *so, u_long cmd, void *data, struct lwp *l)
 		return r;
 
 	case SIOCIFGCLONERS:
-		return if_clone_list((struct if_clonereq *)data);
+		{
+			struct if_clonereq *req = (struct if_clonereq *)data;
+			return if_clone_list(req->ifcr_count, req->ifcr_buffer,
+			    &req->ifcr_total);
+		}
 	}
 
 	if (ifp == NULL)
@@ -2066,13 +2053,11 @@ doifioctl(struct socket *so, u_long cmd, void *data, struct lwp *l)
 	}
 
 	if (((oif_flags ^ ifp->if_flags) & IFF_UP) != 0) {
-#ifdef INET6
-		if (in6_present && (ifp->if_flags & IFF_UP) != 0) {
+		if ((ifp->if_flags & IFF_UP) != 0) {
 			int s = splnet();
-			in6_if_up(ifp);
+			if_up(ifp);
 			splx(s);
 		}
-#endif
 	}
 #ifdef COMPAT_OIFREQ
 	if (cmd != ocmd)

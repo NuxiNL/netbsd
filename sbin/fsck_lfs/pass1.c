@@ -1,4 +1,4 @@
-/* $NetBSD: pass1.c,v 1.37 2013/06/18 18:18:58 christos Exp $	 */
+/* $NetBSD: pass1.c,v 1.39 2015/07/24 06:59:32 dholland Exp $	 */
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -111,8 +111,8 @@ pass1(void)
 	for (i = 0; i < maxino; i++) {
 		dins[i] = emalloc(sizeof(**dins));
 		dins[i]->ino = i;
-		if (i == fs->lfs_ifile)
-			dins[i]->daddr = fs->lfs_idaddr;
+		if (i == lfs_sb_getifile(fs))
+			dins[i]->daddr = lfs_sb_getidaddr(fs);
 		else {
 			LFS_IENTRY(ifp, fs, i, bp);
 			dins[i]->daddr = ifp->if_daddr;
@@ -200,7 +200,7 @@ checkinode(ino_t inumber, struct inodesc * idesc)
 	}
 	lastino = inumber;
 	if (/* dp->di_size < 0 || */
-	    dp->di_size + fs->lfs_bsize - 1 < dp->di_size) {
+	    dp->di_size + lfs_sb_getbsize(fs) - 1 < dp->di_size) {
 		if (debug)
 			printf("bad size %llu:",
 			    (unsigned long long) dp->di_size);
@@ -209,11 +209,11 @@ checkinode(ino_t inumber, struct inodesc * idesc)
 	if (!preen && mode == LFS_IFMT && reply("HOLD BAD BLOCK") == 1) {
 		vp = vget(fs, inumber);
 		dp = VTOD(vp);
-		dp->di_size = fs->lfs_fsize;
+		dp->di_size = lfs_sb_getfsize(fs);
 		dp->di_mode = LFS_IFREG | 0600;
 		inodirty(VTOI(vp));
 	}
-	ndb = howmany(dp->di_size, fs->lfs_bsize);
+	ndb = howmany(dp->di_size, lfs_sb_getbsize(fs));
 	if (ndb < 0) {
 		if (debug)
 			printf("bad size %llu ndb %d:",
@@ -227,8 +227,8 @@ checkinode(ino_t inumber, struct inodesc * idesc)
 		 * Fake ndb value so direct/indirect block checks below
 		 * will detect any garbage after symlink string.
 		 */
-		if (dp->di_size < fs->lfs_maxsymlinklen ||
-		    (fs->lfs_maxsymlinklen == 0 && dp->di_blocks == 0)) {
+		if (dp->di_size < lfs_sb_getmaxsymlinklen(fs) ||
+		    (lfs_sb_getmaxsymlinklen(fs) == 0 && dp->di_blocks == 0)) {
 			ndb = howmany(dp->di_size, sizeof(ulfs_daddr_t));
 			if (ndb > ULFS_NDADDR) {
 				j = ndb - ULFS_NDADDR;
@@ -339,7 +339,7 @@ pass1check(struct inodesc *idesc)
 			return (STOP);
 		}
 	} else if (!testbmap(blkno)) {
-		seg_table[lfs_dtosn(fs, blkno)].su_nbytes += idesc->id_numfrags * fs->lfs_fsize;
+		seg_table[lfs_dtosn(fs, blkno)].su_nbytes += idesc->id_numfrags * lfs_sb_getfsize(fs);
 	}
 	for (ndblks = idesc->id_numfrags; ndblks > 0; blkno++, ndblks--) {
 		if (anyout && chkrange(blkno, 1)) {

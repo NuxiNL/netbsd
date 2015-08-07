@@ -672,7 +672,7 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 * locked yet, but (a) namei is insane, and (b) VOP_RENAME is
 	 * insane, so for the time being we need to leave it like this.
 	 */
-	CLOUDABI_NDINIT(&fnd, DELETE, LOCKPARENT | INRENAME, fpb);
+	CLOUDABI_NDINIT(&fnd, DELETE, LOCKPARENT, fpb);
 	error = cloudabi_namei(l, SCARG(uap, oldfd), CAP_RENAMEAT_SOURCE, &fnd);
 	if (error != 0)
 		goto out2;
@@ -725,7 +725,7 @@ cloudabi_sys_file_rename(struct lwp *l,
 	 *
 	 * XXX Why not pass CREATEDIR always?
 	 */
-	CLOUDABI_NDINIT(&tnd, RENAME, LOCKPARENT | NOCACHE | INRENAME |
+	CLOUDABI_NDINIT(&tnd, RENAME, LOCKPARENT | NOCACHE |
 	    ((fvp->v_type == VDIR)? CREATEDIR : 0), tpb);
 	error = cloudabi_namei(l, SCARG(uap, newfd), CAP_RENAMEAT_TARGET,
 	    &tnd);

@@ -1,4 +1,4 @@
-/*	$NetBSD: file.h,v 1.78 2014/12/14 23:48:58 chs Exp $	*/
+/*	$NetBSD: file.h,v 1.79 2015/05/30 20:09:47 joerg Exp $	*/
 
 /*-
  * Copyright (c) 2009 The NetBSD Foundation, Inc.
@@ -109,6 +109,7 @@ union file_data {
 	struct mqueue *fd_mq;		// DTYPE_MQUEUE
 	struct ksem *fd_ks;		// DTYPE_SEM
 	struct procdesc *fd_pd;		// DTYPE_PROCDESC;
+	struct iscsifd *fd_iscsi;	// DTYPE_MISC (iscsi)
 };
 
 /*
@@ -148,6 +149,7 @@ struct file {
 #define f_devunit	f_undata.fd_devunit
 #define f_bpf		f_undata.fd_bpf
 #define f_fcrypt	f_undata.fd_fcrypt
+#define f_iscsi		f_undata.fd_iscsi
 #endif
 
 /*

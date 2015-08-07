@@ -1,4 +1,4 @@
-/* $NetBSD: lfsv2.c,v 1.9 2013/06/23 07:28:36 dholland Exp $ */
+/* $NetBSD: lfsv2.c,v 1.11 2015/07/24 06:56:42 dholland Exp $ */
 
 #define	LIBSA_LFS
 #define	REQUIRED_LFS_VERSION	2
@@ -16,7 +16,7 @@
 /* XXX wrong! but for now it won't build with ulfs2_dinode */
 #define ufs_dinode		ulfs1_dinode
 
-#define	fs_bsize		lfs_bsize
+#define	fs_bsize		lfs_dlfs.dlfs_bsize
 #define	IFILE_Vx		IFILE
 
 #ifdef LFS_IFILE_FRAG_ADDRESSING	/* XXX see sys/ufs/lfs/ -- not tested */

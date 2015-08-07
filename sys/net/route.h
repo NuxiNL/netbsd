@@ -1,4 +1,4 @@
-/*	$NetBSD: route.h,v 1.90 2015/04/06 09:45:58 ozaki-r Exp $	*/
+/*	$NetBSD: route.h,v 1.92 2015/07/17 02:21:08 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1993
@@ -358,7 +358,6 @@ extern	struct	route_info route_info;
 extern	struct	rtstat	rtstat;
 
 struct socket;
-struct dom_rtlist;
 
 void	rt_init(void);
 
@@ -379,7 +378,6 @@ void	rt_timer_timer(void *);
 void	rt_newmsg(int, struct rtentry *);
 struct rtentry *
 	rtalloc1(const struct sockaddr *, int);
-void	rtflushall(int);
 void	rtfree(struct rtentry *);
 int	rtinit(struct ifaddr *, int, int);
 void	rtredirect(const struct sockaddr *, const struct sockaddr *,
@@ -389,6 +387,8 @@ int	rtrequest(int, const struct sockaddr *,
 	    const struct sockaddr *, const struct sockaddr *, int,
 	    struct rtentry **);
 int	rtrequest1(int, struct rt_addrinfo *, struct rtentry **);
+int	rtrequest_newmsg(const int, const struct sockaddr *,
+	    const struct sockaddr *, const struct sockaddr *, const int);
 
 int	rt_ifa_addlocal(struct ifaddr *);
 int	rt_ifa_remlocal(struct ifaddr *, struct ifaddr *);
@@ -403,40 +403,21 @@ const struct sockaddr *
 struct sockaddr *
 	rt_gettag(struct rtentry *);
 
-static inline void
-rt_destroy(struct rtentry *rt)
+static inline struct rtentry *
+rt_get_gwroute(struct rtentry *rt)
 {
-	if (rt->_rt_key != NULL)
-		sockaddr_free(rt->_rt_key);
-	if (rt->rt_gateway != NULL)
-		sockaddr_free(rt->rt_gateway);
-	if (rt_gettag(rt) != NULL)
-		sockaddr_free(rt_gettag(rt));
-	rt->_rt_key = rt->rt_gateway = rt->rt_tag = NULL;
+	if (rt->rt_gwroute == NULL)
+		return NULL;
+	rt->rt_gwroute->rt_refcnt++;
+	return rt->rt_gwroute;
 }
 
-static inline const struct sockaddr *
-rt_setkey(struct rtentry *rt, const struct sockaddr *key, int flags)
-{
-	if (rt->_rt_key == key)
-		goto out;
-
-	if (rt->_rt_key != NULL)
-		sockaddr_free(rt->_rt_key);
-	rt->_rt_key = sockaddr_dup(key, flags);
-out:
-	rt->rt_nodes->rn_key = (const char *)rt->_rt_key;
-	return rt->_rt_key;
-}
-
-void	rtcache_clear(struct route *);
 void	rtcache_copy(struct route *, const struct route *);
 void	rtcache_free(struct route *);
 struct rtentry *
 	rtcache_init(struct route *);
 struct rtentry *
 	rtcache_init_noclone(struct route *);
-void	rtcache_invalidate(struct dom_rtlist *);
 struct rtentry *
 	rtcache_lookup2(struct route *, const struct sockaddr *, int,
 	    int *);

@@ -1,4 +1,4 @@
-/*	$NetBSD: zic.c,v 1.52 2014/10/07 22:14:46 christos Exp $	*/
+/*	$NetBSD: zic.c,v 1.54 2015/06/21 16:06:51 christos Exp $	*/
 /*
 ** This file is in the public domain, so clarified as of
 ** 2006-07-17 by Arthur David Olson.
@@ -10,7 +10,7 @@
 
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: zic.c,v 1.52 2014/10/07 22:14:46 christos Exp $");
+__RCSID("$NetBSD: zic.c,v 1.54 2015/06/21 16:06:51 christos Exp $");
 #endif /* !defined lint */
 
 #include "private.h"
@@ -40,8 +40,6 @@ typedef int_fast64_t	zic_t;
 #else
 #define MKDIR_UMASK 0755
 #endif
-
-#define end(cp)	(strchr((cp), '\0'))
 
 struct rule {
 	const char *	r_filename;
@@ -381,18 +379,40 @@ size_product(size_t nitems, size_t itemsize)
 	return nitems * itemsize;
 }
 
+#if !HAVE_STRDUP
+static char *
+strdup(char const *str)
+{
+	char *result = malloc(strlen(str) + 1);
+	return result ? strcpy(result, str) : result;
+}
+#endif
+
 static ATTRIBUTE_PURE void *
-memcheck(void *const ptr)
+memcheck(void *ptr)
 {
 	if (ptr == NULL)
 		memory_exhausted(strerror(errno));
 	return ptr;
 }
 
-#define emalloc(size)		memcheck(malloc(size))
-#define erealloc(ptr, size)	memcheck(realloc((ptr), (size)))
-#define ecpyalloc(ptr)		memcheck(icpyalloc(ptr))
-#define ecatalloc(oldp, newp)	memcheck(icatalloc((oldp), (newp)))
+static void *
+zic_malloc(size_t size)
+{
+	return memcheck(malloc(size));
+}
+
+static void *
+zic_realloc(void *ptr, size_t size)
+{
+	return memcheck(realloc(ptr, size));
+}
+
+static char *
+ecpyalloc(char const *str)
+{
+	return memcheck(strdup(str));
+}
 
 static void *
 growalloc(void *ptr, size_t itemsize, int nitems, int *nitems_alloc)
@@ -404,7 +424,7 @@ growalloc(void *ptr, size_t itemsize, int nitems, int *nitems_alloc)
 		if ((amax - 1) / 3 * 2 < *nitems_alloc)
 			memory_exhausted(_("int overflow"));
 		*nitems_alloc = *nitems_alloc + (*nitems_alloc >> 1) + 1;
-		return erealloc(ptr, size_product(*nitems_alloc, itemsize));
+		return zic_realloc(ptr, size_product(*nitems_alloc, itemsize));
 	}
 }
 
@@ -436,7 +456,8 @@ verror(const char *const string, va_list args)
 	**	zic ... 2>&1 | error -t "*" -v
 	** on BSD systems.
 	*/
-	fprintf(stderr, _("\"%s\", line %d: "), filename, linenum);
+	if (filename)
+	  fprintf(stderr, _("\"%s\", line %d: "), filename, linenum);
 	vfprintf(stderr, string, args);
 	if (rfilename != NULL)
 		fprintf(stderr, _(" (rule from \"%s\", line %d)"),
@@ -588,7 +609,7 @@ _("%s: More than one -L option specified\n"),
 				noise = true;
 				break;
 			case 's':
-				warning(_("-s ignored\n"));
+				warning(_("-s ignored"));
 				break;
 		}
 	if (optind == argc - 1 && strcmp(argv[optind], "=") == 0)
@@ -641,31 +662,43 @@ _("%s: More than one -L option specified\n"),
 	return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
-static void
+static bool
 componentcheck(char const *name, char const *component,
 	       char const *component_end)
 {
 	enum { component_len_max = 14 };
 	size_t component_len = component_end - component;
+	if (component_len == 0) {
+	  if (!*name)
+	    error (_("empty file name"));
+	  else
+	    error (_(component == name
+		     ? "file name '%s' begins with '/'"
+		     : *component_end
+		     ? "file name '%s' contains '//'"
+		     : "file name '%s' ends with '/'"),
+		   name);
+	  return false;
+	}
 	if (0 < component_len && component_len <= 2
 	    && component[0] == '.' && component_end[-1] == '.') {
-		fprintf(stderr, _("%s: file name '%s' contains"
-				  " '%.*s' component"),
-			progname, name, (int) component_len, component);
-		exit(EXIT_FAILURE);
+	  error(_("file name '%s' contains '%.*s' component"),
+		name, (int) component_len, component);
+	  return false;
 	}
-	if (!noise)
-		return;
-	if (0 < component_len && component[0] == '-')
-		warning(_("file name '%s' component contains leading '-'"),
-			name);
-	if (component_len_max < component_len)
-		warning(_("file name '%s' contains overlength component"
-			  " '%.*s...'"),
-			name, component_len_max, component);
+	if (noise) {
+	  if (0 < component_len && component[0] == '-')
+	    warning(_("file name '%s' component contains leading '-'"),
+		    name);
+	  if (component_len_max < component_len)
+	    warning(_("file name '%s' contains overlength component"
+		      " '%.*s...'"),
+		    name, component_len_max, component);
+	}
+	return true;
 }
 
-static void
+static bool
 namecheck(const char *name)
 {
 	char const *cp;
@@ -689,14 +722,29 @@ namecheck(const char *name)
 				 ? _("file name '%s' contains byte '%c'")
 				 : _("file name '%s' contains byte '\\%o'")),
 				name, c);
-			return;
 		}
 		if (c == '/') {
-			componentcheck(name, component, cp);
+			if (!componentcheck(name, component, cp))
+			  return false;
 			component = cp + 1;
 		}
 	}
-	componentcheck(name, component, cp);
+	return componentcheck(name, component, cp);
+}
+
+static char *
+relname(char const *dir, char const *base)
+{
+	if (*base == '/')
+		return ecpyalloc(base);
+	else {
+		size_t dir_len = strlen(dir);
+		bool needs_slash = dir_len && dir[dir_len - 1] != '/';
+		char *result = zic_malloc(dir_len + needs_slash + strlen(base) + 1);
+		result[dir_len] = '/';
+		strcpy(result + dir_len + needs_slash, base);
+		return memcpy(result, dir, dir_len);
+	}
 }
 
 static void
@@ -706,21 +754,8 @@ dolink(const char *const fromfield, const char *const tofield)
 	char *	toname;
 	int fromisdir;
 
-	namecheck(tofield);
-	if (fromfield[0] == '/')
-		fromname = ecpyalloc(fromfield);
-	else {
-		fromname = ecpyalloc(directory);
-		fromname = ecatalloc(fromname, "/");
-		fromname = ecatalloc(fromname, fromfield);
-	}
-	if (tofield[0] == '/')
-		toname = ecpyalloc(tofield);
-	else {
-		toname = ecpyalloc(directory);
-		toname = ecatalloc(toname, "/");
-		toname = ecatalloc(toname, tofield);
-	}
+	fromname = relname(directory, fromfield);
+	toname = relname(directory, tofield);
 	/*
 	** We get to be careful here since
 	** there's a fair chance of root running us.
@@ -744,6 +779,8 @@ dolink(const char *const fromfield, const char *const tofield)
 		if (result != 0) {
 				const char *s = fromfield;
 				const char *t;
+				char *p;
+				size_t dotdots = 0;
 				char * symlinkcontents = NULL;
 
 				do
@@ -752,16 +789,16 @@ dolink(const char *const fromfield, const char *const tofield)
 				       && ! strncmp (fromfield, tofield,
 						     ++s - fromfield));
 
-				for (s = tofield + (t - fromfield);
-				     (s = strchr(s, '/'));
-				     s++)
-					symlinkcontents =
-						ecatalloc(symlinkcontents,
-						"../");
-				symlinkcontents = ecatalloc(symlinkcontents, t);
+				for (s = tofield + (t - fromfield); *s; s++)
+					dotdots += *s == '/';
+				symlinkcontents
+				    = zic_malloc(3 * dotdots + strlen(t) + 1);
+				for (p = symlinkcontents; dotdots-- != 0; p += 3)
+					memcpy(p, "../", 3);
+				strcpy(p, t);
 				result = symlink(symlinkcontents, toname);
 				if (result == 0)
-warning(_("hard link failed, symbolic link used"));
+					warning(_("hard link failed, symbolic link used"));
 				free(symlinkcontents);
 		}
 		if (result != 0) {
@@ -796,8 +833,8 @@ warning(_("hard link failed, symbolic link used"));
 
 #define TIME_T_BITS_IN_FILE	64
 
-static const zic_t min_time = (zic_t) -1 << (TIME_T_BITS_IN_FILE - 1);
-static const zic_t max_time = -1 - ((zic_t) -1 << (TIME_T_BITS_IN_FILE - 1));
+static zic_t const min_time = MINVAL (zic_t, TIME_T_BITS_IN_FILE);
+static zic_t const max_time = MAXVAL (zic_t, TIME_T_BITS_IN_FILE);
 
 /* Estimated time of the Big Bang, in seconds since the POSIX epoch.
    rounded downward to the negation of a power of two that is
@@ -841,7 +878,7 @@ itsdir(const char *const name)
 	return S_ISDIR(st.st_mode) != 0;
 #else
 	{
-		char *nameslashdot = ecatalloc(ecpyalloc(name), "/.");
+		char *nameslashdot = relname(name, ".");
 		res = stat(nameslashdot, &st);
 		free(nameslashdot);
 		return res == 0;
@@ -1003,9 +1040,9 @@ infile(const char *name)
 					break;
 				case LC_LEAP:
 					if (name != leapsec)
-						warning(
-_("%s: Leap line in non leap seconds file %s\n"),
-							progname, name);
+					  warning(_("%s: Leap line in non leap"
+						    " seconds file %s"),
+						  progname, name);
 					else	inleap(fields, nfields);
 					wantcont = false;
 					break;
@@ -1036,6 +1073,7 @@ gethms(char const *string, char const *errstring, bool signable)
 {
 	zic_t	hh;
 	int	mm, ss, sign;
+	char	xs;
 
 	if (string == NULL || *string == '\0')
 		return 0;
@@ -1045,12 +1083,12 @@ gethms(char const *string, char const *errstring, bool signable)
 		sign = -1;
 		++string;
 	} else	sign = 1;
-	if (sscanf(string, scheck(string, "%"SCNdZIC), &hh) == 1)
+	if (sscanf(string, "%"SCNdZIC"%c", &hh, &xs) == 1)
 		mm = ss = 0;
-	else if (sscanf(string, scheck(string, "%"SCNdZIC":%d"), &hh, &mm) == 2)
+	else if (sscanf(string, "%"SCNdZIC":%d%c", &hh, &mm, &xs) == 2)
 		ss = 0;
-	else if (sscanf(string, scheck(string, "%"SCNdZIC":%d:%d"),
-		&hh, &mm, &ss) != 3) {
+	else if (sscanf(string, "%"SCNdZIC":%d:%d%c", &hh, &mm, &ss, &xs)
+		 != 3) {
 			error("%s", errstring);
 			return 0;
 	}
@@ -1160,7 +1198,9 @@ inzsub(char **const fields, const int nfields, const int iscont)
 		i_untilday = ZFC_TILDAY;
 		i_untiltime = ZFC_TILTIME;
 		z.z_name = NULL;
-	} else {
+	} else if (!namecheck(fields[ZF_NAME]))
+		return false;
+	else {
 		i_gmtoff = ZF_GMTOFF;
 		i_rule = ZF_RULE;
 		i_format = ZF_FORMAT;
@@ -1228,6 +1268,7 @@ inleap(char **const fields, const int nfields)
 	int			month, day;
 	zic_t			dayoff, tod;
 	zic_t			t;
+	char			xs;
 
 	if (nfields != LEAP_FIELDS) {
 		error(_("wrong number of fields on Leap line"));
@@ -1235,7 +1276,7 @@ inleap(char **const fields, const int nfields)
 	}
 	dayoff = 0;
 	cp = fields[LP_YEAR];
-	if (sscanf(cp, scheck(cp, "%"SCNdZIC), &year) != 1) {
+	if (sscanf(cp, "%"SCNdZIC"%c", &year, &xs) != 1) {
 		/*
 		** Leapin' Lizards!
 		*/
@@ -1270,7 +1311,7 @@ inleap(char **const fields, const int nfields)
 		++j;
 	}
 	cp = fields[LP_DAY];
-	if (sscanf(cp, scheck(cp, "%d"), &day) != 1 ||
+	if (sscanf(cp, "%d%c", &day, &xs) != 1 ||
 		day <= 0 || day > len_months[isleap(year)][month]) {
 			error(_("invalid day of month"));
 			return;
@@ -1335,10 +1376,8 @@ inlink(char **const fields, const int nfields)
 		error(_("blank FROM field on Link line"));
 		return;
 	}
-	if (*fields[LF_TO] == '\0') {
-		error(_("blank TO field on Link line"));
-		return;
-	}
+	if (! namecheck(fields[LF_TO]))
+	  return;
 	l.l_filename = filename;
 	l.l_linenum = linenum;
 	l.l_from = ecpyalloc(fields[LF_FROM]);
@@ -1356,6 +1395,7 @@ rulesub(struct rule *const rp, const char *const loyearp,
 	const char *		cp;
 	char *			dp;
 	char *			ep;
+	char			xs;
 
 	if ((lp = byword(monthp, mon_names)) == NULL) {
 		error(_("invalid month name"));
@@ -1407,7 +1447,7 @@ rulesub(struct rule *const rp, const char *const loyearp,
 				_("%s: panic: Invalid l_value %d\n"),
 				progname, lp->l_value);
 			exit(EXIT_FAILURE);
-	} else if (sscanf(cp, scheck(cp, "%"SCNdZIC), &rp->r_loyear) != 1) {
+	} else if (sscanf(cp, "%"SCNdZIC"%c", &rp->r_loyear, &xs) != 1) {
 		error(_("invalid starting year"));
 		return;
 	}
@@ -1429,7 +1469,7 @@ rulesub(struct rule *const rp, const char *const loyearp,
 				_("%s: panic: Invalid l_value %d\n"),
 				progname, lp->l_value);
 			exit(EXIT_FAILURE);
-	} else if (sscanf(cp, scheck(cp, "%"SCNdZIC), &rp->r_hiyear) != 1) {
+	} else if (sscanf(cp, "%"SCNdZIC"%c", &rp->r_hiyear, &xs) != 1) {
 		error(_("invalid ending year"));
 		return;
 	}
@@ -1482,7 +1522,7 @@ rulesub(struct rule *const rp, const char *const loyearp,
 			}
 			rp->r_wday = lp->l_value;
 		}
-		if (sscanf(ep, scheck(ep, "%d"), &rp->r_dayofmonth) != 1 ||
+		if (sscanf(ep, "%d%c", &rp->r_dayofmonth, &xs) != 1 ||
 			rp->r_dayofmonth <= 0 ||
 			(rp->r_dayofmonth > len_months[1][rp->r_month])) {
 				error(_("invalid day of month"));
@@ -1556,14 +1596,13 @@ writezone(const char *const name, const char *const string, char version)
 	int			leapcnt32, leapi32;
 	int			timecnt32, timei32;
 	int			pass;
-	static char *			fullname;
+	char *			fullname;
 	static const struct tzhead	tzh0;
 	static struct tzhead		tzh;
-	zic_t *ats = emalloc(size_product(timecnt, sizeof *ats + 1));
+	zic_t *ats = zic_malloc(size_product(timecnt, sizeof *ats + 1));
 	void *typesptr = ats + timecnt;
 	unsigned char *types = typesptr;
 
-	namecheck(name);
 	/*
 	** Sort.
 	*/
@@ -1643,9 +1682,7 @@ writezone(const char *const name, const char *const string, char version)
 		--leapcnt32;
 		++leapi32;
 	}
-	fullname = erealloc(fullname,
-	    strlen(directory) + 1 + strlen(name) + 1);
-	(void) sprintf(fullname, "%s/%s", directory, name);	/* XXX: sprintf is safe */
+	fullname = relname(directory, name);
 	/*
 	** Remove old file, if any, to snap links.
 	*/
@@ -1864,15 +1901,16 @@ writezone(const char *const name, const char *const string, char version)
 	(void) fprintf(fp, "\n%s\n", string);
 	close_file(fp, fullname);
 	free(ats);
+	free(fullname);
 }
 
-static void
+static size_t
 doabbr(char *const abbr, const int abbrlen, const char *const format,
     const char *const letters, bool isdst, bool doquotes)
 {
 	char *	cp;
 	char *	slashp;
-	int	len;
+	size_t	len;
 
 	slashp = strchr(format, '/');
 	if (slashp == NULL) {
@@ -1885,18 +1923,18 @@ doabbr(char *const abbr, const int abbrlen, const char *const format,
 		(void) memcpy(abbr, format, slashp - format);
 		abbr[slashp - format] = '\0';
 	}
+	len = strlen(abbr);
 	if (!doquotes)
-		return;
+		return len;
 	for (cp = abbr; is_alpha(*cp); cp++)
 		continue;
-	len = strlen(abbr);
 	if (len > 0 && *cp == '\0')
-		return;
+		return len;
 	abbr[len + 2] = '\0';
 	abbr[len + 1] = '>';
-	for ( ; len > 0; --len)
-		abbr[len] = abbr[len - 1];
+	memmove(abbr + 1, abbr, len);
 	abbr[0] = '<';
+	return len + 2;
 }
 
 static void
@@ -1908,17 +1946,18 @@ updateminmax(const zic_t x)
 		max_year = x;
 }
 
-static bool
+static int
 stringoffset(char *result, zic_t offset)
 {
 	int	hours;
 	int	minutes;
 	int	seconds;
+	bool negative = offset < 0;
+	int len = negative;
 
-	result[0] = '\0';
-	if (offset < 0) {
-		strcpy(result, "-");
+	if (negative) {
 		offset = -offset;
+		result[0] = '-';
 	}
 	seconds = offset % SECSPERMIN;
 	offset /= SECSPERMIN;
@@ -1927,15 +1966,15 @@ stringoffset(char *result, zic_t offset)
 	hours = offset;
 	if (hours >= HOURSPERDAY * DAYSPERWEEK) {
 		result[0] = '\0';
-		return false;
+		return 0;
 	}
-	sprintf(end(result), "%d", hours);
+	len += sprintf(result + len, "%d", hours);
 	if (minutes != 0 || seconds != 0) {
-		sprintf(end(result), ":%02d", minutes);
+		len += sprintf(result + len, ":%02d", minutes);
 		if (seconds != 0)
-			sprintf(end(result), ":%02d", seconds);
+			len += sprintf(result + len, ":%02d", seconds);
 	}
-	return true;
+	return len;
 }
 
 static int
@@ -1945,7 +1984,6 @@ stringrule(char *result, const struct rule *const rp, const zic_t dstoff,
 	zic_t	tod = rp->r_tod;
 	int	compat = 0;
 
-	result = end(result);
 	if (rp->r_dycode == DC_DOM) {
 		int	month, total;
 
@@ -1956,9 +1994,9 @@ stringrule(char *result, const struct rule *const rp, const zic_t dstoff,
 			total += len_months[0][month];
 		/* Omit the "J" in Jan and Feb, as that's shorter.  */
 		if (rp->r_month <= 1)
-		  sprintf(result, "%d", total + rp->r_dayofmonth - 1);
+		  result += sprintf(result, "%d", total + rp->r_dayofmonth - 1);
 		else
-		  sprintf(result, "J%d", total + rp->r_dayofmonth);
+		  result += sprintf(result, "J%d", total + rp->r_dayofmonth);
 	} else {
 		int	week;
 		int	wday = rp->r_wday;
@@ -1985,16 +2023,16 @@ stringrule(char *result, const struct rule *const rp, const zic_t dstoff,
 		} else	return -1;	/* "cannot happen" */
 		if (wday < 0)
 			wday += DAYSPERWEEK;
-		sprintf(result, "M%d.%d.%d",
-			rp->r_month + 1, week, wday);
+		result += sprintf(result, "M%d.%d.%d",
+				  rp->r_month + 1, week, wday);
 	}
 	if (rp->r_todisgmt)
 		tod += gmtoff;
 	if (rp->r_todisstd && rp->r_stdoff == 0)
 		tod += dstoff;
 	if (tod != 2 * SECSPERMIN * MINSPERHOUR) {
-		strcat(result, "/");
-		if (! stringoffset(end(result), tod))
+		*result++ = '/';
+		if (! stringoffset(result, tod))
 			return -1;
 		if (tod < 0) {
 			if (compat < 2013)
@@ -2035,6 +2073,8 @@ stringzone(char *result, const int resultlen, const struct zone *const zpfirst,
 	const char *		abbrvar;
 	int			compat = 0;
 	int			c;
+	size_t			len;
+	int			offsetlen;
 	struct rule		stdr, dstr;
 
 	result[0] = '\0';
@@ -2102,31 +2142,37 @@ stringzone(char *result, const int resultlen, const struct zone *const zpfirst,
 	if (stdrp == NULL && (zp->z_nrules != 0 || zp->z_stdoff != 0))
 		return -1;
 	abbrvar = (stdrp == NULL) ? "" : stdrp->r_abbrvar;
-	doabbr(result, resultlen, zp->z_format, abbrvar, false, true);
-	if (! stringoffset(end(result), -zp->z_gmtoff)) {
+	len = doabbr(result, resultlen, zp->z_format, abbrvar, false, true);
+	offsetlen = stringoffset(result + len, -zp->z_gmtoff);
+	if (! offsetlen) {
 		result[0] = '\0';
 		return -1;
 	}
+	len += offsetlen;
 	if (dstrp == NULL)
 		return compat;
-	doabbr(end(result), resultlen - strlen(result),
-		zp->z_format, dstrp->r_abbrvar, true, true);
-	if (dstrp->r_stdoff != SECSPERMIN * MINSPERHOUR)
-		if (! stringoffset(end(result),
-				   -(zp->z_gmtoff + dstrp->r_stdoff))) {
+	len += doabbr(result + len, resultlen - len, zp->z_format,
+	    dstrp->r_abbrvar, true, true);
+	if (dstrp->r_stdoff != SECSPERMIN * MINSPERHOUR) {
+		offsetlen = stringoffset(result + len,
+		    -(zp->z_gmtoff + dstrp->r_stdoff));
+		if (! offsetlen) {
 			result[0] = '\0';
 			return -1;
 		}
-	(void) strcat(result, ",");
-	c = stringrule(result, dstrp, dstrp->r_stdoff, zp->z_gmtoff);
+		len += offsetlen;
+	}
+	result[len++] = ',';
+	c = stringrule(result + len, dstrp, dstrp->r_stdoff, zp->z_gmtoff);
 	if (c < 0) {
 		result[0] = '\0';
 		return -1;
 	}
 	if (compat < c)
 		compat = c;
-	strcat(result, ",");
-	c = stringrule(result, stdrp, dstrp->r_stdoff, zp->z_gmtoff);
+	len += strlen(result + len);
+	result[len++] = ',';
+	c = stringrule(result + len, stdrp, dstrp->r_stdoff, zp->z_gmtoff);
 	if (c < 0) {
 		result[0] = '\0';
 		return -1;
@@ -2163,9 +2209,9 @@ outzone(const struct zone *const zpfirst, const int zonecount)
 
 	max_abbr_len = 2 + max_format_len + max_abbrvar_len;
 	max_envvar_len = 2 * max_abbr_len + 5 * 9;
-	startbuf = emalloc(max_abbr_len + 1);
-	ab = emalloc(max_abbr_len + 1);
-	envvar = emalloc(max_envvar_len + 1);
+	startbuf = zic_malloc(max_abbr_len + 1);
+	ab = zic_malloc(max_abbr_len + 1);
+	envvar = zic_malloc(max_envvar_len + 1);
 	INITIALIZE(untiltime);
 	INITIALIZE(starttime);
 	/*
@@ -2582,7 +2628,7 @@ yearistype(const int year, const char *const type)
 
 	if (type == NULL || *type == '\0')
 		return true;
-	buf = erealloc(buf, 132 + strlen(yitcommand) + strlen(type));
+	buf = zic_realloc(buf, 132 + strlen(yitcommand) + strlen(type));
 	(void)sprintf(buf, "%s %d %s", yitcommand, year, type); /* XXX: sprintf is safe */
 	result = system(buf);
 	if (WIFEXITED(result)) switch (WEXITSTATUS(result)) {
@@ -2708,7 +2754,7 @@ getfields(char *cp)
 
 	if (cp == NULL)
 		return NULL;
-	array = emalloc(size_product(strlen(cp) + 1, sizeof *array));
+	array = zic_malloc(size_product(strlen(cp) + 1, sizeof *array));
 	nsubs = 0;
 	for ( ; ; ) {
 		while (is_space(*cp))
@@ -2737,26 +2783,36 @@ getfields(char *cp)
 	return array;
 }
 
+static _Noreturn void
+time_overflow(void)
+{
+	error(_("time overflow"));
+	exit(EXIT_FAILURE);
+}
+
 static ATTRIBUTE_PURE zic_t
 oadd(const zic_t t1, const zic_t t2)
 {
-	if (t1 < 0 ? t2 < ZIC_MIN - t1 : ZIC_MAX - t1 < t2) {
-		error(_("time overflow"));
-		exit(EXIT_FAILURE);
-	}
+	if (t1 < 0 ? t2 < ZIC_MIN - t1 : ZIC_MAX - t1 < t2)
+		time_overflow();
 	return t1 + t2;
 }
 
 static ATTRIBUTE_PURE zic_t
 tadd(const zic_t t1, const zic_t t2)
 {
-	if (t1 == max_time && t2 > 0)
-		return max_time;
-	if (t1 == min_time && t2 < 0)
-		return min_time;
-	if (t1 < 0 ? t2 < min_time - t1 : max_time - t1 < t2) {
-		error(_("time overflow"));
-		exit(EXIT_FAILURE);
+	if (t1 < 0) {
+		if (t2 < min_time - t1) {
+			if (t1 != min_time)
+				time_overflow();
+			return min_time;
+		}
+	} else {
+		if (max_time - t1 < t2) {
+			if (t1 != max_time)
+				time_overflow();
+			return max_time;
+		}
 	}
 	return t1 + t2;
 }
@@ -2921,7 +2977,7 @@ mkdirs(char *argname)
 			if (itsdir(name) <= 0) {
 				char const *e = strerror(err);
 				warning(_("%s: Can't create directory"
-					  " %s: %s\n"),
+					  " %s: %s"),
 					progname, name, e);
 				free(name);
 				return false;

@@ -1,4 +1,4 @@
-/*	$NetBSD: net.c,v 1.17 2014/10/14 16:35:20 christos Exp $	*/
+/*	$NetBSD: net.c,v 1.21 2015/05/21 01:09:00 ozaki-r Exp $	*/
 
 /*
  * Copyright 1997 Piermont Information Systems Inc.
@@ -200,7 +200,6 @@ url_encode(char *dst, const char *src, const char *ep,
 }
 
 static const char *ignored_if_names[] = {
-	"eon",			/* netiso */
 	"gre",			/* net */
 	"ipip",			/* netinet */
 	"gif",			/* netinet6 */
@@ -210,7 +209,6 @@ static const char *ignored_if_names[] = {
 #if 0
 	"mdecap",		/* netinet -- never in IF list (?) XXX */
 #endif
-	"nsip",			/* netns */
 	"ppp",			/* net */
 #if 0
 	"sl",			/* net */
@@ -456,8 +454,7 @@ handle_license(const char *dev)
 			    && val != 0)
 				return 1;
 			msg_display(MSG_license, dev, licdev[i].lic);
-			process_menu(MENU_yesno, NULL);
-			if (yesno) {
+			if (ask_yesno(NULL)) {
 				val = 1;
 				if (sysctlbyname(buf, NULL, NULL, &val,
 				    0) == -1)
@@ -491,10 +488,9 @@ config_network(void)
 	int menu_no;
 	int num_devs;
 	int selected_net;
-
 	int i;
 #ifdef INET6
-	int v6config = 1;
+	int v6config = 1, rv;
 #endif
 
 	FILE *f;
@@ -715,8 +711,9 @@ again:
 	if (!(net_dhcpconf & DHCPCONF_NAMESVR)) {
 #ifdef INET6
 		if (v6config) {
-			process_menu(MENU_namesrv6, NULL);
-			if (!yesno)
+			rv = 0;
+			process_menu(MENU_namesrv6, &rv);
+			if (!rv)
 				msg_prompt_add(MSG_net_namesrv, net_namesvr,
 				    net_namesvr, sizeof net_namesvr);
 		} else
@@ -748,9 +745,7 @@ again:
 		     !is_v6kernel() ? "<not supported>" : net_ip6);
 #endif
 done:
-	process_menu(MENU_yesno, deconst(MSG_netok_ok));
-
-	if (!yesno)
+	if (!ask_yesno(MSG_netok_ok))
 		goto again;
 
 	run_program(0, "/sbin/ifconfig lo0 127.0.0.1");
@@ -962,10 +957,11 @@ do_ftp_fetch(const char *set_name, struct ftpinfo *f)
 int
 get_pkgsrc(void)
 {
-	yesno = -1;
-	process_menu(MENU_pkgsrc, NULL);
+	int rv = -1;
+
+	process_menu(MENU_pkgsrc, &rv);
 	
-	if (yesno == SET_SKIP)
+	if (rv == SET_SKIP)
 		return SET_SKIP;
 
 	fetch_fn = pkgsrc_fetch;
@@ -978,10 +974,13 @@ get_pkgsrc(void)
 int
 get_via_ftp(const char *xfer_type)
 {
-	yesno = -1;
-	process_menu(MENU_ftpsource, deconst(xfer_type));
+	arg_rv arg;
+
+	arg.rv = -1;
+	arg.arg = deconst(xfer_type);
+	process_menu(MENU_ftpsource, &arg);
 	
-	if (yesno == SET_RETRY)
+	if (arg.rv == SET_RETRY)
 		return SET_RETRY;
 
 	/* We'll fetch each file just before installing it */
@@ -999,6 +998,7 @@ int
 get_via_nfs(void)
 {
 	struct statvfs sb;
+	int rv;
 
 	/* If root is on NFS and we have sets, skip this step. */
 	if (statvfs(set_dir_bin, &sb) == 0 &&
@@ -1009,10 +1009,10 @@ get_via_nfs(void)
 	}
 
 	/* Get server and filepath */
-	yesno = -1;
-	process_menu(MENU_nfssource, NULL);
+	rv = -1;
+	process_menu(MENU_nfssource, &rv);
 	
-	if (yesno == SET_RETRY)
+	if (rv == SET_RETRY)
 		return SET_RETRY;
 
 	/* Mount it */
@@ -1062,8 +1062,7 @@ mnt_net_config(void)
 
 	if (!network_up)
 		return;
-	process_menu(MENU_yesno, deconst(MSG_mntnetconfig));
-	if (!yesno)
+	if (!ask_yesno(MSG_mntnetconfig))
 		return;
 
 	/* Write hostname to /etc/rc.conf */
@@ -1152,8 +1151,7 @@ config_dhcp(char *inter)
 
 	if (!file_mode_match(DHCPCD, S_IFREG))
 		return 0;
-	process_menu(MENU_yesno, deconst(MSG_Perform_autoconfiguration));
-	if (yesno) {
+	if (ask_yesno(MSG_Perform_autoconfiguration)) {
 		/* spawn off dhcpcd and wait for parent to exit */
 		dhcpautoconf = run_program(RUN_DISPLAY | RUN_PROGRESS,
 		    "%s -d -n %s", DHCPCD, inter);

@@ -1,4 +1,4 @@
-.\"	$NetBSD: module.9,v 1.30 2014/03/18 18:20:40 riastradh Exp $
+.\"	$NetBSD: module.9,v 1.37 2015/06/04 01:58:30 pgoyette Exp $
 .\"
 .\" Copyright (c) 2010 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -418,6 +418,10 @@ Note however that modules loaded manually with
 .Xr modload 8
 are never auto-unloaded.
 .El
+.Sh EXAMPLES
+A set of example modules is available in the
+.Pa src/sys/modules/examples
+directory hierarchy.
 .Sh CODE REFERENCES
 The core of the kernel module implementation is in
 .Pa sys/kern/kern_module.c
@@ -448,7 +452,8 @@ deals with resolution of relocatable symbols.
 is for finding modules passed in by the boot loader.
 .Sh SEE ALSO
 .Xr modctl 2 ,
-.Xr module 7
+.Xr module 7 ,
+.Xr intro 9lua
 .Sh HISTORY
 The kernel module subsystem first appeared in
 .Nx 5.0 .

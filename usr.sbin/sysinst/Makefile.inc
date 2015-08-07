@@ -1,13 +1,9 @@
-#	$NetBSD: Makefile.inc,v 1.5 2014/08/06 12:16:12 martin Exp $
+#	$NetBSD: Makefile.inc,v 1.8 2015/05/17 10:22:20 martin Exp $
 #
 # Makefile for sysinst
 
 .if exists(${.CURDIR}/../../../Makefile.inc)
 .include "${.CURDIR}/../../../Makefile.inc"
-.endif
-
-.if empty(DBG:M-g)
-COPTS += -Os
 .endif
 
 PROG=		sysinst
@@ -51,11 +47,24 @@ CATALOGDIR=	/usr/share/sysinst/catalog
 CPPFLAGS+=	-I. -I${.CURDIR}/../.. -I${.CURDIR} \
 		-DREL=\"${DISTRIBVER}\" -DMACH=\"${MACHINE}\" \
 		-DMACH_${MACHINE} -DARCH_${MACHINE_ARCH} \
-		${NODISKLABEL:D-DNO_DISKLABEL} \
-		-DCATALOG_DIR=\"${CATALOGDIR}\"
+		${NODISKLABEL:D-DNO_DISKLABEL}
+
+.if !defined(DEBUG)
+CPPFLAGS+=	-DCATALOG_DIR=\"${CATALOGDIR}\"
+.endif
 
 .if (defined(DEBUG))
-CPPFLAGS+=-DDEBUG -g -O0
+.if ${ACTIVE_CC} == "gcc"
+# make gcc run additional passes for better debug info (only needed
+# when compiling with -O0)
+O0TRACKING=	-fvar-tracking-assignments -fvar-tracking
+.endif
+CPPFLAGS+=-DDEBUG
+DBG +=-g -O0 ${O0TRACKING}
+.endif
+
+.if empty(DBG:M-g)
+COPTS += -Os
 .endif
 
 .if (!defined(SMALLPROG) || defined(SMALLPROG_INET6)) && (${USE_INET6} != "no")

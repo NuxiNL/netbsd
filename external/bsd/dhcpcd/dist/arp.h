@@ -1,4 +1,4 @@
-/* $NetBSD: arp.h,v 1.8 2015/01/30 09:47:05 roy Exp $ */
+/* $NetBSD: arp.h,v 1.11 2015/07/09 10:15:34 roy Exp $ */
 
 /*
  * dhcpcd - DHCP client daemon
@@ -59,6 +59,7 @@ struct arp_state {
 	void (*probed_cb)(struct arp_state *);
 	void (*announced_cb)(struct arp_state *);
 	void (*conflicted_cb)(struct arp_state *, const struct arp_msg *);
+	void (*free_cb)(struct arp_state *);
 
 	struct in_addr addr;
 	int probes;
@@ -67,15 +68,28 @@ struct arp_state {
 };
 TAILQ_HEAD(arp_statehead, arp_state);
 
+struct iarp_state {
+	int fd;
+	struct arp_statehead arp_states;
+};
+
+#define ARP_STATE(ifp)							       \
+	((struct iarp_state *)(ifp)->if_data[IF_DATA_ARP])
+#define ARP_CSTATE(ifp)							       \
+	((const struct iarp_state *)(ifp)->if_data[IF_DATA_ARP])
+
 #ifdef INET
 void arp_report_conflicted(const struct arp_state *, const struct arp_msg *);
 void arp_announce(struct arp_state *);
 void arp_probe(struct arp_state *);
-struct arp_state *arp_new(struct interface *);
+struct arp_state *arp_new(struct interface *, const struct in_addr *);
 void arp_cancel(struct arp_state *);
 void arp_free(struct arp_state *);
 void arp_free_but(struct arp_state *);
+struct arp_state *arp_find(struct interface *, const struct in_addr *);
 void arp_close(struct interface *);
+
+void arp_handleifa(int, struct interface *, const struct in_addr *, int);
 #else
 #define arp_close(a) {}
 #endif

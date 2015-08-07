@@ -1,4 +1,4 @@
-/*	$NetBSD: if_tokensubr.c,v 1.66 2014/11/28 08:29:00 ozaki-r Exp $	*/
+/*	$NetBSD: if_tokensubr.c,v 1.69 2015/07/01 03:39:36 ozaki-r Exp $	*/
 
 /*
  * Copyright (c) 1982, 1989, 1993
@@ -92,7 +92,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.66 2014/11/28 08:29:00 ozaki-r Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.69 2015/07/01 03:39:36 ozaki-r Exp $");
 
 #include "opt_inet.h"
 #include "opt_atalk.h"
@@ -135,21 +135,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_tokensubr.c,v 1.66 2014/11/28 08:29:00 ozaki-r Ex
 #include <netinet/ip_carp.h>
 #endif
 
-#ifdef DECNET
-#include <netdnet/dn.h>
-#endif
-
 #define senderr(e) { error = (e); goto bad;}
-
-#if defined(__bsdi__) || defined(__NetBSD__)
-#define	RTALLOC1(a, b)			rtalloc1(a, b)
-#define	ARPRESOLVE(a, b, c, d, e, f)	arpresolve(a, b, c, d, e)
-#define	TYPEHTONS(t)			(t)
-#elif defined(__FreeBSD__)
-#define	RTALLOC1(a, b)			rtalloc1(a, b, 0UL)
-#define	ARPRESOLVE(a, b, c, d, e, f)	arpresolve(a, b, c, d, e, f)
-#define	TYPEHTONS(t)			(htons(t))
-#endif
 
 #define RCF_ALLROUTES (2 << 8) | TOKEN_RCF_FRAME2 | TOKEN_RCF_BROADCAST_ALL
 #define RCF_SINGLEROUTE (2 << 8) | TOKEN_RCF_FRAME2 | TOKEN_RCF_BROADCAST_SINGLE
@@ -166,13 +152,12 @@ static void	token_input(struct ifnet *, struct mbuf *);
  */
 static int
 token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
-    struct rtentry *rt0)
+    struct rtentry *rt)
 {
 	uint16_t etype;
 	int error = 0;
 	u_char edst[ISO88025_ADDR_LEN];
 	struct mbuf *m = m0;
-	struct rtentry *rt;
 	struct mbuf *mcopy = NULL;
 	struct token_header *trh;
 #ifdef INET
@@ -192,7 +177,7 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 		if (dst != NULL && ifp0->if_link_state == LINK_STATE_UP &&
 		    (ifa = ifa_ifwithaddr(dst)) != NULL &&
 		    ifa->ifa_ifp == ifp0)
-			return (looutput(ifp0, m, dst, rt0));
+			return (looutput(ifp0, m, dst, rt));
 
 		ifp = ifp->if_carpdev;
 		ah = (struct arphdr *)ifp;
@@ -205,28 +190,6 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
-	if ((rt = rt0)) {
-		if ((rt->rt_flags & RTF_UP) == 0) {
-			if ((rt0 = rt = RTALLOC1(dst, 1)))
-				rt->rt_refcnt--;
-			else
-				senderr(EHOSTUNREACH);
-		}
-		if (rt->rt_flags & RTF_GATEWAY) {
-			if (rt->rt_gwroute == 0)
-				goto lookup;
-			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
-				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = RTALLOC1(rt->rt_gateway, 1);
-				if ((rt = rt->rt_gwroute) == 0)
-					senderr(EHOSTUNREACH);
-			}
-		}
-		if (rt->rt_flags & RTF_REJECT)
-			if (rt->rt_rmx.rmx_expire == 0 ||
-			    time_second < rt->rt_rmx.rmx_expire)
-				senderr(rt == rt0 ? EHOSTDOWN : EHOSTUNREACH);
-	}
 
 	/*
 	 * If the queueing discipline needs packet classification,
@@ -253,7 +216,7 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
  * XXX m->m_flags & M_MCAST   IEEE802_MAP_IP_MULTICAST ??
  */
 		else {
-			if (!ARPRESOLVE(ifp, rt, m, dst, edst, rt0))
+			if (!arpresolve(ifp, rt, m, dst, edst))
 				return (0);	/* if not yet resolved */
 			rif = TOKEN_RIF((struct llinfo_arp *) rt->rt_llinfo);
 			riflen = (ntohs(rif->tr_rcf) & TOKEN_RCF_LEN_MASK) >> 8;
@@ -331,7 +294,7 @@ token_output(struct ifnet *ifp0, struct mbuf *m0, const struct sockaddr *dst,
 		memcpy(edst, eh->ether_dhost, sizeof(edst));
 		if (*edst & 1)
 			m->m_flags |= (M_BCAST|M_MCAST);
-		etype = TYPEHTONS(eh->ether_type);
+		etype = eh->ether_type;
 		if (m->m_flags & M_BCAST) {
 			if (ifp->if_flags & IFF_LINK0) {
 				if (ifp->if_flags & IFF_LINK1)
@@ -451,7 +414,7 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 	l = (struct llc *)(mtod(m, uint8_t *) + lan_hdr_len);
 
 	switch (l->llc_dsap) {
-#if defined(INET) || defined(NS) || defined(DECNET)
+#if defined(INET)
 	case LLC_SNAP_LSAP:
 	{
 		uint16_t etype;
@@ -481,12 +444,6 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 			inq = &arpintrq;
 			break;
 #endif
-#ifdef DECNET
-		case ETHERTYPE_DECNET:
-			isr = NETISR_DECNET;
-			inq = &decnetintrq;
-			break;
-#endif
 		default:
 			/*
 			printf("token_input: unknown protocol 0x%x\n", etype);
@@ -496,12 +453,12 @@ token_input(struct ifnet *ifp, struct mbuf *m)
 		}
 		break;
 	}
-#endif /* INET || NS || DECNET */
+#endif /* INET */
 
 	default:
 		/* printf("token_input: unknown dsap 0x%x\n", l->llc_dsap); */
 		ifp->if_noproto++;
-#if defined(INET) || defined(NS) || defined(DECNET)
+#if defined(INET)
 	dropanyway:
 #endif
 		m_freem(m);

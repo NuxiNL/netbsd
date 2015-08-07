@@ -1,4 +1,4 @@
-#	$NetBSD: Makefile,v 1.29 2015/02/09 17:48:07 christos Exp $
+#	$NetBSD: Makefile,v 1.31 2015/06/16 23:48:20 christos Exp $
 
 PROG=		crash
 MAN=		crash.8

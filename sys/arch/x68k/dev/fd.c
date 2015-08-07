@@ -1,4 +1,4 @@
-/*	$NetBSD: fd.c,v 1.116 2015/04/13 21:18:43 riastradh Exp $	*/
+/*	$NetBSD: fd.c,v 1.118 2015/07/11 10:32:46 kamil Exp $	*/
 
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -64,7 +64,7 @@
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.116 2015/04/13 21:18:43 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: fd.c,v 1.118 2015/07/11 10:32:46 kamil Exp $");
 
 #include "opt_ddb.h"
 #include "opt_m68k_arch.h"
@@ -298,7 +298,9 @@ const struct cdevsw fd_cdevsw = {
 
 void fdstart(struct fd_softc *);
 
-struct dkdriver fddkdriver = { fdstrategy };
+struct dkdriver fddkdriver = {
+	.d_strategy = fdstrategy
+};
 
 void fd_set_motor(struct fdc_softc *, int);
 void fd_motor_off(void *);
@@ -352,7 +354,7 @@ fdc_dmastart(struct fdc_softc *fdc, int read, void *addr, vsize_t count)
 	 * Note 2:
 	 *  FDC is connected to LSB 8 bits of X68000 16 bit bus
 	 *  (as BUS_SPACE_MAP_SHIFTED_ODD defined in bus.h)
-	 *  so each FDC regsiter is mapped at sparse odd address.
+	 *  so each FDC register is mapped at sparse odd address.
 	 *
 	 * XXX: No proper API to get DMA address of FDC register for DMAC.
 	 */
