@@ -209,9 +209,9 @@ struct sysent cloudabi64_sysent[] = {
 		.sy_call = (sy_call_t *)cloudabi64_sys_poll
 	},		/* 39 = poll */
 	{
-		ns(struct cloudabi64_sys_proc_exec_args),
+		ns(struct cloudabi_sys_proc_exec_args),
 		.sy_flags = SYCALL_ARG_PTR,
-		.sy_call = (sy_call_t *)cloudabi64_sys_proc_exec
+		.sy_call = (sy_call_t *)cloudabi_sys_proc_exec
 	},		/* 40 = proc_exec */
 	{
 		ns(struct cloudabi_sys_proc_exit_args),
@@ -286,8 +286,10 @@ struct sysent cloudabi64_sysent[] = {
 		.sy_call = (sy_call_t *)cloudabi_sys_thread_yield
 	},		/* 56 = thread_yield */
 	{
-		.sy_call = sys_nosys,
-	},		/* 57 = filler */
+		ns(struct cloudabi64_sys_poll_fd_args),
+		.sy_flags = SYCALL_ARG_PTR,
+		.sy_call = (sy_call_t *)cloudabi64_sys_poll_fd
+	},		/* 57 = poll_fd */
 	{
 		.sy_call = sys_nosys,
 	},		/* 58 = filler */

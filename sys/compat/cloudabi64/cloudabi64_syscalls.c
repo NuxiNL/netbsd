@@ -75,7 +75,7 @@ const char *const cloudabi64_syscallnames[] = {
 	/*  54 */	"thread_exit",
 	/*  55 */	"thread_tcb_set",
 	/*  56 */	"thread_yield",
-	/*  57 */	"# filler",
+	/*  57 */	"poll_fd",
 	/*  58 */	"# filler",
 	/*  59 */	"# filler",
 	/*  60 */	"# filler",

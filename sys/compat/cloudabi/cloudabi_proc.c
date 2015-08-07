@@ -34,6 +34,15 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <compat/cloudabi/cloudabi_syscallargs.h>
 
+int
+cloudabi_sys_proc_exec(struct lwp *l,
+    const struct cloudabi_sys_proc_exec_args *uap, register_t *retval)
+{
+
+	/* Not implemented. */
+	return (ENOSYS);
+}
+
 /* Converts CloudABI's signal numbers to NetBSD's. */
 static int
 convert_signal(cloudabi_signal_t in, int *out)

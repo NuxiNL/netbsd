@@ -44,6 +44,7 @@ check_syscall_args(cloudabi_sys_clock_time_get)
 
 struct cloudabi_sys_condvar_signal_args {
 	syscallarg(cloudabi_condvar_t *) condvar;
+	syscallarg(cloudabi_mflags_t) scope;
 	syscallarg(cloudabi_nthreads_t) nwaiters;
 };
 check_syscall_args(cloudabi_sys_condvar_signal)
@@ -252,6 +253,7 @@ check_syscall_args(cloudabi_sys_file_unlink)
 
 struct cloudabi_sys_lock_unlock_args {
 	syscallarg(cloudabi_lock_t *) lock;
+	syscallarg(cloudabi_mflags_t) scope;
 };
 check_syscall_args(cloudabi_sys_lock_unlock)
 
@@ -305,22 +307,20 @@ struct cloudabi_sys_mem_unmap_args {
 check_syscall_args(cloudabi_sys_mem_unmap)
 
 struct cloudabi64_sys_poll_args {
-	syscallarg(cloudabi_fd_t) fd;
 	syscallarg(const cloudabi64_subscription_t *) in;
-	syscallarg(cloudabi64_size_t) nin;
 	syscallarg(cloudabi64_event_t *) out;
-	syscallarg(cloudabi64_size_t) nout;
+	syscallarg(cloudabi64_size_t) nevents;
 };
 check_syscall_args(cloudabi64_sys_poll)
 
-struct cloudabi64_sys_proc_exec_args {
+struct cloudabi_sys_proc_exec_args {
 	syscallarg(cloudabi_fd_t) fd;
-	syscallarg(const cloudabi64_ciovec_t *) iov;
-	syscallarg(cloudabi64_size_t) iovcnt;
+	syscallarg(const void *) data;
+	syscallarg(size_t) datalen;
 	syscallarg(const cloudabi_fd_t *) fds;
-	syscallarg(cloudabi64_size_t) fdscnt;
+	syscallarg(size_t) fdscnt;
 };
-check_syscall_args(cloudabi64_sys_proc_exec)
+check_syscall_args(cloudabi_sys_proc_exec)
 
 struct cloudabi_sys_proc_exit_args {
 	syscallarg(cloudabi_exitcode_t) rval;
@@ -400,6 +400,7 @@ check_syscall_args(cloudabi64_sys_thread_create)
 
 struct cloudabi_sys_thread_exit_args {
 	syscallarg(cloudabi_lock_t *) lock;
+	syscallarg(cloudabi_mflags_t) scope;
 };
 check_syscall_args(cloudabi_sys_thread_exit)
 
@@ -407,6 +408,16 @@ struct cloudabi64_sys_thread_tcb_set_args {
 	syscallarg(void *) tcb;
 };
 check_syscall_args(cloudabi64_sys_thread_tcb_set)
+
+struct cloudabi64_sys_poll_fd_args {
+	syscallarg(cloudabi_fd_t) fd;
+	syscallarg(const cloudabi64_subscription_t *) in;
+	syscallarg(cloudabi64_size_t) nin;
+	syscallarg(cloudabi64_event_t *) out;
+	syscallarg(cloudabi64_size_t) nout;
+	syscallarg(const cloudabi64_subscription_t *) timeout;
+};
+check_syscall_args(cloudabi64_sys_poll_fd)
 
 /*
  * System call prototypes.
@@ -492,7 +503,7 @@ int	cloudabi_sys_mem_unmap(struct lwp *, const struct cloudabi_sys_mem_unmap_arg
 
 int	cloudabi64_sys_poll(struct lwp *, const struct cloudabi64_sys_poll_args *, register_t *);
 
-int	cloudabi64_sys_proc_exec(struct lwp *, const struct cloudabi64_sys_proc_exec_args *, register_t *);
+int	cloudabi_sys_proc_exec(struct lwp *, const struct cloudabi_sys_proc_exec_args *, register_t *);
 
 int	cloudabi_sys_proc_exit(struct lwp *, const struct cloudabi_sys_proc_exit_args *, register_t *);
 
@@ -525,5 +536,7 @@ int	cloudabi_sys_thread_exit(struct lwp *, const struct cloudabi_sys_thread_exit
 int	cloudabi64_sys_thread_tcb_set(struct lwp *, const struct cloudabi64_sys_thread_tcb_set_args *, register_t *);
 
 int	cloudabi_sys_thread_yield(struct lwp *, const void *, register_t *);
+
+int	cloudabi64_sys_poll_fd(struct lwp *, const struct cloudabi64_sys_poll_fd_args *, register_t *);
 
 #endif /* _CLOUDABI64_SYS_SYSCALLARGS_H_ */

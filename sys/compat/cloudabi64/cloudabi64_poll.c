@@ -226,8 +226,7 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 	 * Bandaid to support CloudABI futex constructs that are not
 	 * implemented through NetBSD's kqueue().
 	 */
-	if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE && SCARG(uap, nin) == 1 &&
-	    SCARG(uap, nout) >= 1) {
+	if (SCARG(uap, nevents) == 1) {
 		cloudabi64_subscription_t sub;
 		cloudabi64_event_t ev;
 
@@ -266,8 +265,7 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));
 		}
-	} else if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE &&
-	    SCARG(uap, nin) == 2 && SCARG(uap, nout) >= 2) {
+	} else if (SCARG(uap, nevents) == 2) {
 		cloudabi64_subscription_t sub[2];
 		cloudabi64_event_t ev[2] = {};
 
@@ -342,18 +340,21 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 		}
 	}
 
-	if (SCARG(uap, fd) == CLOUDABI_POLL_ONCE) {
-		/* Anonymous poll call. */
-		error = kevent1_anonymous(retval,
-		    (const struct kevent *)SCARG(uap, in),
-		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
-		    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops);
-	} else {
-		/* Stateful poll call with a file descriptor. */
-		error = kevent1(retval, SCARG(uap, fd),
-		    (const struct kevent *)SCARG(uap, in),
-		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
-		    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops);
-	}
-	return (error);
+	/* Anonymous poll call. */
+	return (kevent1_anonymous(retval,
+	    (const struct kevent *)SCARG(uap, in),
+	    (struct kevent *)SCARG(uap, out),
+	    SCARG(uap, nevents), &cloudabi64_kevent_ops));
+}
+
+int
+cloudabi64_sys_poll_fd(struct lwp *l,
+    const struct cloudabi64_sys_poll_fd_args *uap, register_t *retval)
+{
+
+	/* Stateful poll call with a file descriptor. */
+	return (kevent1(retval, SCARG(uap, fd),
+	    (const struct kevent *)SCARG(uap, in),
+	    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
+	    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops));
 }

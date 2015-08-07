@@ -18,7 +18,7 @@
 /* syscall: "clock_time_get" ret: "cloudabi_timestamp_t" args: "cloudabi_clockid_t" "cloudabi_timestamp_t" */
 #define	CLOUDABI64_SYS_clock_time_get	1
 
-/* syscall: "condvar_signal" ret: "void" args: "cloudabi_condvar_t *" "cloudabi_nthreads_t" */
+/* syscall: "condvar_signal" ret: "void" args: "cloudabi_condvar_t *" "cloudabi_mflags_t" "cloudabi_nthreads_t" */
 #define	CLOUDABI64_SYS_condvar_signal	2
 
 /* syscall: "fd_close" ret: "void" args: "cloudabi_fd_t" */
@@ -105,7 +105,7 @@
 /* syscall: "file_unlink" ret: "void" args: "cloudabi_fd_t" "const char *" "size_t" "cloudabi_ulflags_t" */
 #define	CLOUDABI64_SYS_file_unlink	30
 
-/* syscall: "lock_unlock" ret: "void" args: "cloudabi_lock_t *" */
+/* syscall: "lock_unlock" ret: "void" args: "cloudabi_lock_t *" "cloudabi_mflags_t" */
 #define	CLOUDABI64_SYS_lock_unlock	31
 
 /* syscall: "mem_advise" ret: "void" args: "void *" "size_t" "cloudabi_advice_t" */
@@ -129,10 +129,10 @@
 /* syscall: "mem_unmap" ret: "void" args: "void *" "size_t" */
 #define	CLOUDABI64_SYS_mem_unmap	38
 
-/* syscall: "poll" ret: "cloudabi64_size_t" args: "cloudabi_fd_t" "const cloudabi64_subscription_t *" "cloudabi64_size_t" "cloudabi64_event_t *" "cloudabi64_size_t" */
+/* syscall: "poll" ret: "cloudabi64_size_t" args: "const cloudabi64_subscription_t *" "cloudabi64_event_t *" "cloudabi64_size_t" */
 #define	CLOUDABI64_SYS_poll	39
 
-/* syscall: "proc_exec" ret: "void" args: "cloudabi_fd_t" "const cloudabi64_ciovec_t *" "cloudabi64_size_t" "const cloudabi_fd_t *" "cloudabi64_size_t" */
+/* syscall: "proc_exec" ret: "void" args: "cloudabi_fd_t" "const void *" "size_t" "const cloudabi_fd_t *" "size_t" */
 #define	CLOUDABI64_SYS_proc_exec	40
 
 /* syscall: "proc_exit" ret: "void" args: "cloudabi_exitcode_t" */
@@ -174,7 +174,7 @@
 /* syscall: "thread_create" ret: "cloudabi_tid_t" args: "cloudabi64_threadattr_t *" */
 #define	CLOUDABI64_SYS_thread_create	53
 
-/* syscall: "thread_exit" ret: "void" args: "cloudabi_lock_t *" */
+/* syscall: "thread_exit" ret: "void" args: "cloudabi_lock_t *" "cloudabi_mflags_t" */
 #define	CLOUDABI64_SYS_thread_exit	54
 
 /* syscall: "thread_tcb_set" ret: "void" args: "void *" */
@@ -183,6 +183,9 @@
 /* syscall: "thread_yield" ret: "void" args: */
 #define	CLOUDABI64_SYS_thread_yield	56
 
-#define	CLOUDABI64_SYS_MAXSYSCALL	57
+/* syscall: "poll_fd" ret: "cloudabi64_size_t" args: "cloudabi_fd_t" "const cloudabi64_subscription_t *" "cloudabi64_size_t" "cloudabi64_event_t *" "cloudabi64_size_t" "const cloudabi64_subscription_t *" */
+#define	CLOUDABI64_SYS_poll_fd	57
+
+#define	CLOUDABI64_SYS_MAXSYSCALL	58
 #define	CLOUDABI64_SYS_NSYSENT	512
 #endif /* _CLOUDABI64_SYS_SYSCALL_H_ */

@@ -57,15 +57,12 @@ cloudabi64_setregs(struct lwp *l, struct exec_package *pack, vaddr_t stack)
 
 	/*
 	 * Set registers to initial values. The first argument should
-	 * point to the startup data structure. The second argument
-	 * should be set to its size, so crt0.c can zero pad the
-	 * structure if necessary.
+	 * point to the auxiliary vector.
 	 */
 	/* TODO(ed): Why do we need to fix up the stack alignment here? */
 	setregs(l, pack, stack / 16 * 16 - 8);
 	tf = l->l_md.md_regs;
 	tf->tf_rdi = stack;
-	tf->tf_rsi = sizeof(cloudabi64_startup_data_t);
 
 	/* Ignore SIGPIPE. */
 	sigaction1(l, SIGPIPE, &sigign, NULL, NULL, 0);
@@ -176,19 +173,28 @@ cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
 {
 	/* TODO(ed): Use proper offset instead of 0x400000. */
 	Elf_Ehdr *eh = pack->ep_hdr;
-	cloudabi64_startup_data_t startup_data = {
-		.sd_elf_phdr	= eh->e_phoff + 0x400000,
-		.sd_elf_phdrlen	= eh->e_phnum,
-
-		.sd_thread_id	= cloudabi_gettid(l),
-		.sd_random_seed	= cprng_fast64(),
-
-		.sd_ncpus	= ncpu,
-		.sd_pagesize	= PAGE_SIZE,
+	/* Write out an auxiliary vector. */
+	cloudabi64_auxv_t auxv[] = {
+#define	VAL(type, val)	{ .a_type = (type), .a_val = (val) }
+#define	PTR(type, ptr)	{ .a_type = (type), .a_ptr = (uintptr_t)(ptr) }
+#if 0
+		PTR(CLOUDABI_AT_ARGDATA, argdata),
+		VAL(CLOUDABI_AT_ARGDATALEN, argdatalen),
+		PTR(CLOUDABI_AT_CANARY, canary),
+		VAL(CLOUDABI_AT_CANARYLEN, sizeof(canarybuf)),
+#endif
+		VAL(CLOUDABI_AT_NCPUS, ncpu),
+		VAL(CLOUDABI_AT_PAGESZ, PAGE_SIZE),
+		PTR(CLOUDABI_AT_PHDR, eh->e_phoff + 0x400000),
+		VAL(CLOUDABI_AT_PHNUM, eh->e_phnum),
+		VAL(CLOUDABI_AT_TID, cloudabi_gettid(l)),
+#undef VAL
+#undef PTR
+		{ .a_type = CLOUDABI_AT_NULL },
 	};
 
 	/* TODO(ed): Is this done at the right offset? */
-	return (copyout(&startup_data, *stackp, sizeof(startup_data)));
+	return (copyout(auxv, *stackp, sizeof(auxv)));
 }
 
 static struct emul cloudabi64_emul = {

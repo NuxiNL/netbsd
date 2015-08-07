@@ -1053,6 +1053,7 @@ END {
 
 	maxsyscall = syscall
 	if (nsysent) {
+		printf("%d %d\n", syscall, nsysent);
 		if (syscall > nsysent) {
 			printf("%s: line %d: too many syscalls [%d > %d]\n", infile, NR, syscall, nsysent)
 			exit 1

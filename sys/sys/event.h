@@ -232,9 +232,8 @@ int 	kevent_put_events(void *, struct kevent *, struct kevent *, size_t,
 int	kevent1(register_t *, int, const struct kevent *,
     size_t, struct kevent *, size_t, const struct timespec *,
     const struct kevent_ops *);
-int	kevent1_anonymous(register_t *, const struct kevent *,
-    size_t, struct kevent *, size_t, const struct timespec *,
-    const struct kevent_ops *);
+int	kevent1_anonymous(register_t *, const struct kevent *, struct kevent *,
+    size_t, const struct kevent_ops *);
 
 int	kfilter_register(const char *, const struct filterops *, int *);
 int	kfilter_unregister(const char *);
