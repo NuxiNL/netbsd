@@ -86,11 +86,13 @@ void cloudabi_futex_destroy(void);
  * sleep on a lock or condition variable.
  */
 int cloudabi_futex_condvar_wait(struct lwp *, cloudabi_condvar_t *,
-    cloudabi_lock_t *, cloudabi_clockid_t, cloudabi_timestamp_t,
-    cloudabi_timestamp_t);
+    cloudabi_mflags_t, cloudabi_lock_t *, cloudabi_mflags_t, cloudabi_clockid_t,
+    cloudabi_timestamp_t, cloudabi_timestamp_t);
 int cloudabi_futex_lock_rdlock(struct lwp *, cloudabi_lock_t *,
-    cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
+    cloudabi_mflags_t, cloudabi_clockid_t, cloudabi_timestamp_t,
+    cloudabi_timestamp_t);
 int cloudabi_futex_lock_wrlock(struct lwp *, cloudabi_lock_t *,
-    cloudabi_clockid_t, cloudabi_timestamp_t, cloudabi_timestamp_t);
+    cloudabi_mflags_t, cloudabi_clockid_t, cloudabi_timestamp_t,
+    cloudabi_timestamp_t);
 
 #endif

@@ -227,7 +227,8 @@ static int cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *,
  */
 
 static int
-futex_address_create(struct futex_address *fa, thread_t td, const void *object)
+futex_address_create(struct futex_address *fa, thread_t td, const void *object,
+    cloudabi_mflags_t scope)
 {
 	struct vm_amap *va;
 	struct uvm_object *vo;
@@ -236,39 +237,50 @@ futex_address_create(struct futex_address *fa, thread_t td, const void *object)
 	struct vm_map_entry *entry;
 
 	vs = td->l_proc->p_vmspace;
-	map = &vs->vm_map;
+	switch (scope) {
+	case CLOUDABI_MAP_SHARED:
+		map = &vs->vm_map;
+		vm_map_lock(map);
+		if (!uvm_map_lookup_entry(map, (vaddr_t)object, &entry)) {
+			vm_map_unlock(map);
+			return (EFAULT);
+		}
+		cloudabi_assert(!UVM_ET_ISSUBMAP(entry),
+		    "Mapping cannot be a submap");
 
-	vm_map_lock(map);
-	if (!uvm_map_lookup_entry(map, (vaddr_t)object, &entry)) {
+		if (entry->inheritance != MAP_INHERIT_SHARE) {
+			/* Address corresponds with process-local mapping. */
+			fa->fa_kind = FK_SPACE;
+			fa->fa_value.space = vs;
+			fa->fa_offset = (uintptr_t)object;
+		} else if (entry->object.uvm_obj != NULL) {
+			/* Shared mapping to a file. */
+			fa->fa_kind = FK_OBJECT;
+			vo = entry->object.uvm_obj;
+			fa->fa_value.object = vo;
+			vo->pgops->pgo_reference(vo);
+			fa->fa_offset = (vaddr_t)object - entry->start +
+			    entry->offset;
+		} else {
+			/* Shared mapping to anonymous memory. */
+			fa->fa_kind = FK_AMAP;
+			va = entry->aref.ar_amap;
+			fa->fa_value.amap = va;
+			fa->fa_offset = (vaddr_t)object - entry->start +
+			    (entry->aref.ar_pageoff << PAGE_SHIFT);
+			amap_ref(va, fa->fa_offset >> PAGE_SHIFT, 1, 0);
+		}
 		vm_map_unlock(map);
-		return (EFAULT);
-	}
-	cloudabi_assert(!UVM_ET_ISSUBMAP(entry), "Mapping cannot be a submap");
-
-	if (entry->inheritance != MAP_INHERIT_SHARE) {
+		return (0);
+	case CLOUDABI_MAP_PRIVATE:
 		/* Address corresponds with process-local mapping. */
 		fa->fa_kind = FK_SPACE;
 		fa->fa_value.space = vs;
 		fa->fa_offset = (uintptr_t)object;
-	} else if (entry->object.uvm_obj != NULL) {
-		/* Shared mapping to a file. */
-		fa->fa_kind = FK_OBJECT;
-		vo = entry->object.uvm_obj;
-		fa->fa_value.object = vo;
-		vo->pgops->pgo_reference(vo);
-		fa->fa_offset = entry->offset - entry->start + (vaddr_t)object;
-	} else {
-		/* Shared mapping to anonymous memory. */
-		fa->fa_kind = FK_AMAP;
-		va = entry->aref.ar_amap;
-		fa->fa_value.amap = va;
-		fa->fa_offset = (entry->aref.ar_pageoff << PAGE_SHIFT) -
-		    entry->start + (vaddr_t)object;
-		amap_ref(va, fa->fa_offset >> PAGE_SHIFT, 1, 0);
+		return (0);
+	default:
+		return (EINVAL);
 	}
-
-	vm_map_unlock(map);
-	return (0);
 }
 
 static void
@@ -312,13 +324,13 @@ futex_condvar_assert(const struct futex_condvar *fc)
 
 static int
 futex_condvar_lookup(thread_t td, const cloudabi_condvar_t *address,
-    struct futex_condvar **fcret)
+    cloudabi_mflags_t scope, struct futex_condvar **fcret)
 {
 	struct futex_address fa_condvar;
 	struct futex_condvar *fc;
 	int error;
 
-	error = futex_address_create(&fa_condvar, td, address);
+	error = futex_address_create(&fa_condvar, td, address, scope);
 	if (error != 0)
 		return (error);
 
@@ -339,17 +351,18 @@ futex_condvar_lookup(thread_t td, const cloudabi_condvar_t *address,
 
 static int
 futex_condvar_lookup_or_create(thread_t td, const cloudabi_condvar_t *condvar,
-    const cloudabi_lock_t *lock, struct futex_condvar **fcret)
+    cloudabi_mflags_t condvar_scope, const cloudabi_lock_t *lock,
+    cloudabi_mflags_t lock_scope, struct futex_condvar **fcret)
 {
 	struct futex_address fa_condvar, fa_lock;
 	struct futex_condvar *fc;
 	struct futex_lock *fl;
 	int error;
 
-	error = futex_address_create(&fa_condvar, td, condvar);
+	error = futex_address_create(&fa_condvar, td, condvar, condvar_scope);
 	if (error != 0)
 		return (error);
-	error = futex_address_create(&fa_lock, td, lock);
+	error = futex_address_create(&fa_lock, td, lock, lock_scope);
 	if (error != 0) {
 		futex_address_free(&fa_condvar);
 		return (error);
@@ -436,12 +449,12 @@ futex_lock_assert(const struct futex_lock *fl)
 
 static int
 futex_lock_lookup(thread_t td, const cloudabi_lock_t *address,
-    struct futex_lock **flret)
+    cloudabi_mflags_t scope, struct futex_lock **flret)
 {
 	struct futex_address fa;
 	int error;
 
-	error = futex_address_create(&fa, td, address);
+	error = futex_address_create(&fa, td, address, scope);
 	if (error != 0)
 		return (error);
 
@@ -1003,7 +1016,8 @@ futex_user_cmpxchg(uint32_t *obj, uint32_t cmp, uint32_t *old, uint32_t new)
 
 int
 cloudabi_futex_condvar_wait(thread_t td, cloudabi_condvar_t *condvar,
-    cloudabi_lock_t *lock, cloudabi_clockid_t clock_id,
+    cloudabi_mflags_t condvar_scope, cloudabi_lock_t *lock,
+    cloudabi_mflags_t lock_scope, cloudabi_clockid_t clock_id,
     cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
 	struct futex_condvar *fc;
@@ -1012,7 +1026,8 @@ cloudabi_futex_condvar_wait(thread_t td, cloudabi_condvar_t *condvar,
 	int error, error2;
 
 	/* Lookup condition variable object. */
-	error = futex_condvar_lookup_or_create(td, condvar, lock, &fc);
+	error = futex_condvar_lookup_or_create(td, condvar, condvar_scope, lock,
+	    lock_scope, &fc);
 	if (error != 0)
 		return (error);
 	fl = fc->fc_lock;
@@ -1086,34 +1101,33 @@ cloudabi_futex_condvar_wait_unlocked(struct futex_condvar *fc,
 
 int
 cloudabi_futex_lock_rdlock(thread_t td, cloudabi_lock_t *lock,
-    cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
-    cloudabi_timestamp_t precision)
+    cloudabi_mflags_t scope, cloudabi_clockid_t clock_id,
+    cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
 	struct futex_lock *fl;
 	int error;
 
 	/* Look up lock object. */
-	error = futex_lock_lookup(td, lock, &fl);
+	error = futex_lock_lookup(td, lock, scope, &fl);
 	if (error != 0)
 		return (error);
 
-	error = futex_lock_rdlock(fl, td, lock, clock_id, timeout,
-	    precision);
+	error = futex_lock_rdlock(fl, td, lock, clock_id, timeout, precision);
 	futex_lock_release(fl);
 	return (error);
 }
 
 int
 cloudabi_futex_lock_wrlock(thread_t td, cloudabi_lock_t *lock,
-    cloudabi_clockid_t clock_id, cloudabi_timestamp_t timeout,
-    cloudabi_timestamp_t precision)
+    cloudabi_mflags_t scope, cloudabi_clockid_t clock_id,
+    cloudabi_timestamp_t timeout, cloudabi_timestamp_t precision)
 {
 	struct futex_lock *fl;
 	struct futex_queue fq;
 	int error;
 
 	/* Look up lock object. */
-	error = futex_lock_lookup(td, lock, &fl);
+	error = futex_lock_lookup(td, lock, scope, &fl);
 	if (error != 0)
 		return (error);
 
@@ -1144,7 +1158,8 @@ cloudabi_sys_condvar_signal(thread_t td,
 	}
 
 	/* Look up futex object. */
-	error = futex_condvar_lookup(td, SCARG(uap, condvar), &fc);
+	error = futex_condvar_lookup(td, SCARG(uap, condvar), SCARG(uap, scope),
+	    &fc);
 	if (error != 0) {
 		/* Race condition: condition variable with no waiters. */
 		if (error == ENOENT)
@@ -1194,7 +1209,7 @@ cloudabi_sys_lock_unlock(thread_t td,
 	struct futex_lock *fl;
 	int error;
 
-	error = futex_lock_lookup(td, SCARG(uap, lock), &fl);
+	error = futex_lock_lookup(td, SCARG(uap, lock), SCARG(uap, scope), &fl);
 	if (error != 0)
 		return (error);
 	error = futex_lock_unlock(fl, td, SCARG(uap, lock));
