@@ -40,37 +40,38 @@ static cloudabi_signal_t
 convert_signal(int sig)
 {
 	static const cloudabi_signal_t signals[] = {
-		[SIGABRT] = CLOUDABI_SIGABRT,
-		[SIGALRM] = CLOUDABI_SIGALRM,
-		[SIGBUS] = CLOUDABI_SIGBUS,
-		[SIGCHLD] = CLOUDABI_SIGCHLD,
-		[SIGCONT] = CLOUDABI_SIGCONT,
-		[SIGFPE] = CLOUDABI_SIGFPE,
-		[SIGHUP] = CLOUDABI_SIGHUP,
-		[SIGILL] = CLOUDABI_SIGILL,
-		[SIGINT] = CLOUDABI_SIGINT,
-		[SIGKILL] = CLOUDABI_SIGKILL,
-		[SIGPIPE] = CLOUDABI_SIGPIPE,
-		[SIGQUIT] = CLOUDABI_SIGQUIT,
-		[SIGSEGV] = CLOUDABI_SIGSEGV,
-		[SIGSTOP] = CLOUDABI_SIGSTOP,
-		[SIGSYS] = CLOUDABI_SIGSYS,
-		[SIGTERM] = CLOUDABI_SIGTERM,
-		[SIGTRAP] = CLOUDABI_SIGTRAP,
-		[SIGTSTP] = CLOUDABI_SIGTSTP,
-		[SIGTTIN] = CLOUDABI_SIGTTIN,
-		[SIGTTOU] = CLOUDABI_SIGTTOU,
-		[SIGURG] = CLOUDABI_SIGURG,
-		[SIGUSR1] = CLOUDABI_SIGUSR1,
-		[SIGUSR2] = CLOUDABI_SIGUSR2,
-		[SIGVTALRM] = CLOUDABI_SIGVTALRM,
-		[SIGXCPU] = CLOUDABI_SIGXCPU,
-		[SIGXFSZ] = CLOUDABI_SIGXFSZ,
+		[SIGABRT]	= CLOUDABI_SIGABRT,
+		[SIGALRM]	= CLOUDABI_SIGALRM,
+		[SIGBUS]	= CLOUDABI_SIGBUS,
+		[SIGCHLD]	= CLOUDABI_SIGCHLD,
+		[SIGCONT]	= CLOUDABI_SIGCONT,
+		[SIGFPE]	= CLOUDABI_SIGFPE,
+		[SIGHUP]	= CLOUDABI_SIGHUP,
+		[SIGILL]	= CLOUDABI_SIGILL,
+		[SIGINT]	= CLOUDABI_SIGINT,
+		[SIGKILL]	= CLOUDABI_SIGKILL,
+		[SIGPIPE]	= CLOUDABI_SIGPIPE,
+		[SIGQUIT]	= CLOUDABI_SIGQUIT,
+		[SIGSEGV]	= CLOUDABI_SIGSEGV,
+		[SIGSTOP]	= CLOUDABI_SIGSTOP,
+		[SIGSYS]	= CLOUDABI_SIGSYS,
+		[SIGTERM]	= CLOUDABI_SIGTERM,
+		[SIGTRAP]	= CLOUDABI_SIGTRAP,
+		[SIGTSTP]	= CLOUDABI_SIGTSTP,
+		[SIGTTIN]	= CLOUDABI_SIGTTIN,
+		[SIGTTOU]	= CLOUDABI_SIGTTOU,
+		[SIGURG]	= CLOUDABI_SIGURG,
+		[SIGUSR1]	= CLOUDABI_SIGUSR1,
+		[SIGUSR2]	= CLOUDABI_SIGUSR2,
+		[SIGVTALRM]	= CLOUDABI_SIGVTALRM,
+		[SIGXCPU]	= CLOUDABI_SIGXCPU,
+		[SIGXFSZ]	= CLOUDABI_SIGXFSZ,
 	};
 
-	if (sig >= 0 && sig < __arraycount(signals) && signals[sig] != 0)
-		return (signals[sig]);
-	return (SIGABRT);
+	/* Convert unknown signals to SIGABRT. */
+	if (sig < 0 || sig >= __arraycount(signals) || signals[sig] == 0)
+		return (SIGABRT);
+	return (signals[sig]);
 }
 
 /* Converts CloudABI's event objects to NetBSD's struct kevent. */
@@ -78,74 +79,79 @@ static int
 cloudabi64_kevent_fetch_changes(void *arg, const struct kevent *inp,
     struct kevent *kevp, size_t index, int count)
 {
-	const cloudabi64_subscription_t *in =
-	    (const cloudabi64_subscription_t *)inp + index;
+	cloudabi64_subscription_t sub;
+	const cloudabi64_subscription_t *in;
+	cloudabi_timestamp_t ts;
+	int error;
 
+	in = (const cloudabi64_subscription_t *)inp + index;
 	while (count-- > 0) {
-		cloudabi64_subscription_t sub;
-		int error;
-
 		error = copyin(in++, &sub, sizeof(sub));
 		if (error != 0)
 			return (error);
 
+		memset(kevp, '\0', sizeof(*kevp));
+		kevp->udata = sub.userdata;
 		switch (sub.type) {
-		case CLOUDABI_EVENTTYPE_CLOCK: {
-			cloudabi_timestamp_t ts;
-
-			/* Convert timestamp to a relative value. */
-			if (sub.clock.timeout > 0) {
-				/* Non-zero timestamp. */
+		case CLOUDABI_EVENTTYPE_CLOCK:
+			kevp->filter = EVFILT_TIMER;
+			kevp->ident = sub.clock.identifier;
+			if ((sub.clock.flags &
+			    CLOUDABI_SUBSCRIPTION_CLOCK_ABSTIME) != 0 &&
+			    sub.clock.timeout > 0) {
+				/* Convert absolute timestamp to a relative. */
 				error = cloudabi_clock_time_get(curlwp,
 				    sub.clock.clock_id, &ts);
 				if (error != 0)
 					return (error);
 				ts = ts > sub.clock.timeout ? 0 :
 				    sub.clock.timeout - ts;
-				if (ts > INTPTR_MAX)
-					ts = INTPTR_MAX;
 			} else {
-				/* Shortcut: no need to ask for the time. */
-				ts = 0;
+				/* Relative timestamp. */
+				ts = sub.clock.timeout;
 			}
-			kevp->filter = EVFILT_TIMER;
-			kevp->ident = sub.clock.identifier;
-			kevp->fflags = 0;
-			kevp->data = ts / 1000000;
+			ts /= 1000000;
+			kevp->data = ts > INT64_MAX ? INT64_MAX : ts;
 			/* Prevent returning EINVAL. */
 			if (kevp->data == 0)
 				kevp->data = 1;
 			break;
-		}
 		case CLOUDABI_EVENTTYPE_FD_READ:
 			kevp->filter = EVFILT_READ;
 			kevp->ident = sub.fd_readwrite.fd;
 			/* TODO(ed): Fix the poll() case. */
-			kevp->fflags = 0;
-			kevp->data = 0;
 			break;
 		case CLOUDABI_EVENTTYPE_FD_WRITE:
 			kevp->filter = EVFILT_WRITE;
 			kevp->ident = sub.fd_readwrite.fd;
-			kevp->fflags = 0;
-			kevp->data = 0;
 			break;
 		case CLOUDABI_EVENTTYPE_PROC_TERMINATE:
 			kevp->filter = EVFILT_PROCDESC;
 			kevp->ident = sub.proc_terminate.fd;
 			kevp->fflags = NOTE_EXIT;
-			kevp->data = 0;
 			break;
 		default:
 			kevp->filter = UINT32_MAX;
-			kevp->ident = 0;
-			kevp->fflags = 0;
-			kevp->data = 0;
 			break;
 		}
-		/* TODO(ed): Use proper flags if not anonymous. */
-		kevp->flags = EV_ADD | EV_ONESHOT;
-		kevp->udata = sub.userdata;
+		if (arg) {
+			/* Ignore flags. Simply use oneshot mode. */
+			kevp->flags = EV_ADD | EV_ONESHOT;
+		} else {
+			/* Translate flags. */
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_ADD) != 0)
+				kevp->flags |= EV_ADD;
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_CLEAR) != 0)
+				kevp->flags |= EV_CLEAR;
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_DELETE) != 0)
+				kevp->flags |= EV_DELETE;
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_DISABLE) != 0)
+				kevp->flags |= EV_DISABLE;
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_ENABLE) != 0)
+				kevp->flags |= EV_ENABLE;
+			if ((sub.flags & CLOUDABI_SUBSCRIPTION_ONESHOT) != 0)
+				kevp->flags |= EV_ONESHOT;
+		}
 		++kevp;
 	}
 	return (0);
@@ -156,51 +162,65 @@ static int
 cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
     struct kevent *outp, size_t index, int count)
 {
-	cloudabi64_event_t *out = (cloudabi64_event_t *)outp + index;
+	cloudabi64_event_t ev;
+	cloudabi64_event_t *out;
+	int error;
 
+	out = (cloudabi64_event_t *)outp + index;
 	while (count-- > 0) {
-		cloudabi64_event_t ev;
-		int error;
-
+		/* Convert fields that should always be present. */
 		memset(&ev, '\0', sizeof(ev));
+		ev.userdata = (uintptr_t)kevp->udata;
 		switch (kevp->filter) {
 		case EVFILT_TIMER:
 			ev.type = CLOUDABI_EVENTTYPE_CLOCK;
 			ev.clock.identifier = kevp->ident;
 			break;
 		case EVFILT_READ:
-		case EVFILT_WRITE:
-			ev.type = kevp->filter == EVFILT_READ ?
-			    CLOUDABI_EVENTTYPE_FD_READ :
-			    CLOUDABI_EVENTTYPE_FD_WRITE;
+			ev.type = CLOUDABI_EVENTTYPE_FD_READ;
 			ev.fd_readwrite.fd = kevp->ident;
-			ev.fd_readwrite.nbytes = kevp->data;
-			if ((kevp->flags & EV_EOF) != 0) {
-				ev.fd_readwrite.flags |=
-				    CLOUDABI_EVENT_FD_READWRITE_HANGUP;
-			}
+			break;
+		case EVFILT_WRITE:
+			ev.type = CLOUDABI_EVENTTYPE_FD_WRITE;
+			ev.fd_readwrite.fd = kevp->ident;
 			break;
 		case EVFILT_PROCDESC:
 			ev.type = CLOUDABI_EVENTTYPE_PROC_TERMINATE;
 			ev.proc_terminate.fd = kevp->ident;
-			if (WIFSIGNALED(kevp->data)) {
-				/* Process terminated due to a signal. */
-				ev.proc_terminate.signal =
-				    convert_signal(WTERMSIG(kevp->data));
-				ev.proc_terminate.exitcode = 0;
-			} else {
-				/* Process exited. */
-				ev.proc_terminate.signal = 0;
-				ev.proc_terminate.exitcode =
-				    WEXITSTATUS(kevp->data);
-			}
 			break;
 		}
-		ev.userdata = kevp->udata;
-		if (kevp->flags & EV_ERROR) {
-			ev.error = kevp->data == ENOTCAPABLE ?
-			    CLOUDABI_EINVAL :
-			    cloudabi_convert_errno(kevp->data);
+
+		if ((kevp->flags & EV_ERROR) == 0) {
+			/* Success. */
+			switch (kevp->filter) {
+			case EVFILT_READ:
+			case EVFILT_WRITE:
+				ev.fd_readwrite.nbytes = kevp->data;
+				if ((kevp->flags & EV_EOF) != 0) {
+					ev.fd_readwrite.flags |=
+					    CLOUDABI_EVENT_FD_READWRITE_HANGUP;
+				}
+				break;
+			case EVFILT_PROCDESC:
+				if (WIFSIGNALED(kevp->data)) {
+					/* Process got signalled. */
+					ev.proc_terminate.signal =
+					   convert_signal(WTERMSIG(kevp->data));
+					ev.proc_terminate.exitcode = 0;
+				} else {
+					/* Process exited. */
+					ev.proc_terminate.signal = 0;
+					ev.proc_terminate.exitcode =
+					    WEXITSTATUS(kevp->data);
+				}
+				break;
+			}
+		} else {
+			/* Error. */
+			if (kevp->data == ENOTCAPABLE)
+				ev.error = CLOUDABI_EINVAL;
+			else
+				ev.error = cloudabi_convert_errno(kevp->data);
 		}
 		++kevp;
 
@@ -211,15 +231,15 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 	return (0);
 }
 
-static struct kevent_ops cloudabi64_kevent_ops = {
-	.keo_fetch_changes	= cloudabi64_kevent_fetch_changes,
-	.keo_put_events		= cloudabi64_kevent_put_events
-};
-
 int
 cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
     register_t *retval)
 {
+	static struct kevent_ops copyops = {
+		.keo_fetch_changes	= cloudabi64_kevent_fetch_changes,
+		.keo_put_events		= cloudabi64_kevent_put_events,
+		.keo_private		= (void *)1,
+	};
 	int error;
 
 	/*
@@ -344,17 +364,40 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 	return (kevent1_anonymous(retval,
 	    (const struct kevent *)SCARG(uap, in),
 	    (struct kevent *)SCARG(uap, out),
-	    SCARG(uap, nevents), &cloudabi64_kevent_ops));
+	    SCARG(uap, nevents), &copyops));
 }
 
 int
 cloudabi64_sys_poll_fd(struct lwp *l,
     const struct cloudabi64_sys_poll_fd_args *uap, register_t *retval)
 {
+	static struct kevent_ops copyops = {
+		.keo_fetch_changes	= cloudabi64_kevent_fetch_changes,
+		.keo_put_events		= cloudabi64_kevent_put_events,
+	};
+	cloudabi64_subscription_t subtimo;
+	struct timespec timeout;
+	int error;
 
-	/* Stateful poll call with a file descriptor. */
-	return (kevent1(retval, SCARG(uap, fd),
-	    (const struct kevent *)SCARG(uap, in),
-	    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
-	    SCARG(uap, nout), NULL, &cloudabi64_kevent_ops));
+	if (SCARG(uap, timeout) != NULL) {
+		/* Poll with a timeout. */
+		error = copyin(SCARG(uap, timeout), &subtimo, sizeof(subtimo));
+		if (error != 0)
+			return (error);
+		if (subtimo.type != CLOUDABI_EVENTTYPE_CLOCK ||
+		    subtimo.clock.flags != 0)
+			return (EINVAL);
+		timeout.tv_sec = subtimo.clock.timeout / 1000000000;
+		timeout.tv_nsec = subtimo.clock.timeout % 1000000000;
+		return (kevent1(retval, SCARG(uap, fd),
+		    (const struct kevent *)SCARG(uap, in),
+		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
+		    SCARG(uap, nout), &timeout, &copyops));
+	} else {
+		/* Poll without a timeout. */
+		return (kevent1(retval, SCARG(uap, fd),
+		    (const struct kevent *)SCARG(uap, in),
+		    SCARG(uap, nin), (struct kevent *)SCARG(uap, out),
+		    SCARG(uap, nout), NULL, &copyops));
+	}
 }
