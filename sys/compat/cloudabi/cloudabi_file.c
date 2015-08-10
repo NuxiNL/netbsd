@@ -298,6 +298,8 @@ cloudabi_sys_file_link(struct lwp *l,
 	if (error == 0) {
 		/* Create hardlink. */
 		error = VOP_LINK(nd.ni_dvp, vp, &nd.ni_cnd);
+		VOP_UNLOCK(nd.ni_dvp);
+		vrele(nd.ni_dvp);
 	} else {
 		/* Abort. */
 		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
