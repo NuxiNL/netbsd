@@ -405,9 +405,7 @@ cloudabi_sys_file_open(struct lwp *l,
 	}
 
 	/* Allocate a new file descriptor. */
-	cloudabi_convert_rights(fds.fs_rights_base, &rights_base);
-	cloudabi_convert_rights(fds.fs_rights_inheriting, &rights_inheriting);
-	error = fd_allocfile(&fp, rights_base, rights_inheriting, &fd);
+	error = fd_allocfile(&fp, CAP_ALL_MASK, CAP_ALL_MASK, &fd);
 	if (error != 0)
 		goto out2;
 
@@ -426,6 +424,13 @@ cloudabi_sys_file_open(struct lwp *l,
 	fp->f_type = DTYPE_VNODE;
 	fp->f_ops = &vnops;
 	fp->f_vnode = nd.ni_vp;
+
+	/* Determine which Capsicum rights to set on the file descriptor. */
+	cloudabi_remove_conflicting_rights(cloudabi_convert_filetype(fp),
+	    &fds.fs_rights_base, &fds.fs_rights_inheriting);
+	cloudabi_convert_rights(fds.fs_rights_base, &rights_base);
+	cloudabi_convert_rights(fds.fs_rights_inheriting, &rights_inheriting);
+	fd_setrights(fd, rights_base, rights_inheriting);
 
 	VOP_UNLOCK(nd.ni_vp);
 	retval[0] = fd;
