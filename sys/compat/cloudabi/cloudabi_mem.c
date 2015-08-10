@@ -102,16 +102,13 @@ cloudabi_sys_mem_map(struct lwp *l, const struct cloudabi_sys_mem_map_args *uap,
 	SCARG(&sys_mmap_args, addr) = SCARG(uap, addr);
 	SCARG(&sys_mmap_args, len) = SCARG(uap, len);
 	SCARG(&sys_mmap_args, prot) = convert_mprot(SCARG(uap, prot));
+	SCARG(&sys_mmap_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_mmap_args, pos) = SCARG(uap, off);
 
 	/* Translate flags. */
 	SCARG(&sys_mmap_args, flags) = 0;
-	if (SCARG(uap, flags) & CLOUDABI_MAP_ANON) {
+	if (SCARG(uap, flags) & CLOUDABI_MAP_ANON)
 		SCARG(&sys_mmap_args, flags) |= MAP_ANON;
-		SCARG(&sys_mmap_args, fd) = -1;
-	} else {
-		SCARG(&sys_mmap_args, fd) = SCARG(uap, fd);
-	}
 	if (SCARG(uap, flags) & CLOUDABI_MAP_FIXED)
 		SCARG(&sys_mmap_args, flags) |= MAP_FIXED;
 	if (SCARG(uap, flags) & CLOUDABI_MAP_PRIVATE)
