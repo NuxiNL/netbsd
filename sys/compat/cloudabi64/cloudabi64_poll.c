@@ -274,7 +274,7 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 			ev.error = cloudabi_convert_errno(
 			    cloudabi_futex_lock_rdlock(
 			        l, (cloudabi_lock_t *)sub.lock.lock,
-			        sub.condvar.lock_scope,
+			        sub.lock.lock_scope,
 			        CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0));
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));
@@ -284,7 +284,7 @@ cloudabi64_sys_poll(struct lwp *l, const struct cloudabi64_sys_poll_args *uap,
 			ev.error = cloudabi_convert_errno(
 			    cloudabi_futex_lock_wrlock(
 			        l, (cloudabi_lock_t *)sub.lock.lock,
-			        sub.condvar.lock_scope,
+			        sub.lock.lock_scope,
 			        CLOUDABI_CLOCK_MONOTONIC, UINT64_MAX, 0));
 			retval[0] = 1;
 			return (copyout(&ev, SCARG(uap, out), sizeof(ev)));

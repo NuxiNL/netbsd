@@ -50,6 +50,7 @@ cloudabi_sys_thread_exit(struct lwp *l,
 
         /* Wake up joining thread. */
 	SCARG(&cloudabi_sys_lock_unlock_args, lock) = SCARG(uap, lock);
+	SCARG(&cloudabi_sys_lock_unlock_args, scope) = SCARG(uap, scope);
 	cloudabi_sys_lock_unlock(l, &cloudabi_sys_lock_unlock_args, retval);
 
         /* Terminate thread. */
