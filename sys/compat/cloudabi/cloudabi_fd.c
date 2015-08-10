@@ -336,7 +336,7 @@ cloudabi_convert_filetype(const struct file *fp)
 
 /* Converts NetBSD's Capsicum rights to CloudABI's set of rights. */
 static cloudabi_rights_t
-convert_netbsd_rights(cap_rights_t rights)
+convert_capabilities(cap_rights_t rights)
 {
 	cloudabi_rights_t ret = 0;
 
@@ -379,13 +379,13 @@ cloudabi_sys_fd_stat_get(struct lwp *l,
 	if (oflags & O_SYNC)
 		fsb.fs_flags |= CLOUDABI_FDFLAG_SYNC;
 
-	fsb.fs_rights_base = convert_netbsd_rights(base);
-	fsb.fs_rights_inheriting = convert_netbsd_rights(inheriting);
+	fsb.fs_rights_base = convert_capabilities(base);
+	fsb.fs_rights_inheriting = convert_capabilities(inheriting);
 	return (copyout(&fsb, SCARG(uap, buf), sizeof(fsb)));
 }
 
 int
-cloudabi_convert_cloudabi_rights(cloudabi_rights_t in, cap_rights_t *out)
+cloudabi_convert_rights(cloudabi_rights_t in, cap_rights_t *out)
 {
 
 	*out = 0;
@@ -435,11 +435,11 @@ cloudabi_sys_fd_stat_put(struct lwp *l,
 		return (sys_fcntl(l, &sys_fcntl_args, retval));
 	} else if (SCARG(uap, flags) == CLOUDABI_FDSTAT_RIGHTS) {
 		/* Convert rights. */
-		error = cloudabi_convert_cloudabi_rights(
+		error = cloudabi_convert_rights(
 		    fsb.fs_rights_base, &rights_base);
 		if (error != 0)
 			return (error);
-		error = cloudabi_convert_cloudabi_rights(
+		error = cloudabi_convert_rights(
 		    fsb.fs_rights_inheriting, &rights_inheriting);
 		if (error != 0)
 			return (error);

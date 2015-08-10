@@ -329,67 +329,58 @@ cloudabi_sys_file_open(struct lwp *l,
 	cap_rights_t fd_base, fd_inheriting, rights_base, rights_inheriting,
 	    rights_needed;
 	int error, fd, fflags;
+	bool read, write;
 
 	/* Copy in initial file descriptor properties. */
 	error = copyin(SCARG(uap, fds), &fds, sizeof(fds));
 	if (error != 0)
 		return (error);
 
-	/* Translate flags. */
-	fflags = O_NOCTTY;
-#define	COPY_FLAG(flag) do {						\
-	if (SCARG(uap, oflags) & CLOUDABI_O_##flag)			\
-		fflags |= O_##flag;					\
-} while (0)
-	COPY_FLAG(CREAT);
-	COPY_FLAG(DIRECTORY);
-	COPY_FLAG(EXCL);
-	COPY_FLAG(TRUNC);
-#undef COPY_FLAG
-#define	COPY_FLAG(flag) do {						\
-	if (fds.fs_flags & CLOUDABI_FDFLAG_##flag)			\
-		fflags |= O_##flag;					\
-} while (0)
-	COPY_FLAG(APPEND);
-	COPY_FLAG(DSYNC);
-	COPY_FLAG(NONBLOCK);
-	COPY_FLAG(RSYNC);
-	COPY_FLAG(SYNC);
-#undef COPY_FLAG
+	/* Convert rights. */
+	error = cloudabi_convert_rights(
+	    fds.fs_rights_base | fds.fs_rights_inheriting, &rights_needed);
+	if (error != 0)
+		return (error);
+
+	/* Convert rights to corresponding access mode. */
+	read = (fds.fs_rights_base & (CLOUDABI_RIGHT_FD_READ |
+	    CLOUDABI_RIGHT_FILE_READDIR | CLOUDABI_RIGHT_MEM_MAP_EXEC)) != 0;
+	write = (fds.fs_rights_base & (CLOUDABI_RIGHT_FD_DATASYNC |
+	    CLOUDABI_RIGHT_FD_WRITE | CLOUDABI_RIGHT_FILE_ALLOCATE |
+	    CLOUDABI_RIGHT_FILE_STAT_FPUT_SIZE)) != 0;
+	fflags = write ? read ? FREAD | FWRITE : FWRITE : FREAD;
+
+	/* Convert open flags. */
+	if ((SCARG(uap, oflags) & CLOUDABI_O_CREAT) != 0)
+		fflags |= O_CREAT;
+	if ((SCARG(uap, oflags) & CLOUDABI_O_DIRECTORY) != 0)
+		fflags |= O_DIRECTORY;
+	if ((SCARG(uap, oflags) & CLOUDABI_O_EXCL) != 0)
+		fflags |= O_EXCL;
+	if ((SCARG(uap, oflags) & CLOUDABI_O_TRUNC) != 0) {
+		fflags |= O_TRUNC;
+		rights_needed |= CAP_FTRUNCATE;
+	}
+	if ((fds.fs_flags & CLOUDABI_FDFLAG_APPEND) != 0)
+		fflags |= O_APPEND;
+	if ((fds.fs_flags & CLOUDABI_FDFLAG_NONBLOCK) != 0)
+		fflags |= O_NONBLOCK;
+	if ((fds.fs_flags & CLOUDABI_FDFLAG_SYNC) != 0) {
+		fflags |= O_SYNC;
+		rights_needed |= CAP_FSYNC;
+	}
+	if ((fds.fs_flags & CLOUDABI_FDFLAG_DSYNC) != 0) {
+		fflags |= O_DSYNC;
+		rights_needed |= CAP_FSYNC;
+	}
+	if ((fds.fs_flags & CLOUDABI_FDFLAG_RSYNC) != 0) {
+		fflags |= O_RSYNC;
+		rights_needed |= CAP_FSYNC;
+	}
 	if ((SCARG(uap, fd) & CLOUDABI_LOOKUP_SYMLINK_FOLLOW) == 0)
 		fflags |= O_NOFOLLOW;
-
-	/* Convert rights. */
-	error = cloudabi_convert_cloudabi_rights(fds.fs_rights_base,
-	    &rights_base);
-	if (error != 0)
-		return (error);
-	error = cloudabi_convert_cloudabi_rights(fds.fs_rights_inheriting,
-	    &rights_inheriting);
-	if (error != 0)
-		return (error);
-
-	/* Figure out which inheriting rights on the descriptor are needed. */
-	/* TODO(ed): Make this more complete! */
-	rights_needed = rights_base | rights_inheriting;
-	if ((fflags & O_TRUNC) != 0)
-		rights_needed |= CAP_FTRUNCATE;
-
-	/* Roughly convert rights to open() access mode. */
-	if ((fds.fs_rights_base &
-	    (CLOUDABI_RIGHT_FD_READ | CLOUDABI_RIGHT_FILE_READDIR)) != 0 &&
-	    (fds.fs_rights_base & CLOUDABI_RIGHT_FD_WRITE) != 0)
-		fflags |= FREAD | FWRITE;
-	else if ((fds.fs_rights_base &
-	    (CLOUDABI_RIGHT_FD_READ | CLOUDABI_RIGHT_FILE_READDIR)) != 0)
-		fflags |= FREAD;
-	else if ((fds.fs_rights_base & CLOUDABI_RIGHT_FD_WRITE) != 0)
-		fflags |= FWRITE;
-	else if ((fds.fs_rights_base &
-	    (CLOUDABI_RIGHT_PROC_EXEC | CLOUDABI_RIGHT_FILE_OPEN)) != 0)
-		fflags |= FREAD;
-	else
-		return (EINVAL);
+	if (write && (fflags & (O_APPEND | O_TRUNC)) == 0)
+		rights_needed |= CAP_SEEK;
 
 	/* Copy in the pathname. */
 	error = pathbuf_copyin_length(SCARG(uap, path), SCARG(uap, pathlen),
@@ -414,6 +405,8 @@ cloudabi_sys_file_open(struct lwp *l,
 	}
 
 	/* Allocate a new file descriptor. */
+	cloudabi_convert_rights(fds.fs_rights_base, &rights_base);
+	cloudabi_convert_rights(fds.fs_rights_inheriting, &rights_inheriting);
 	error = fd_allocfile(&fp, rights_base, rights_inheriting, &fd);
 	if (error != 0)
 		goto out2;
