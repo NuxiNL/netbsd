@@ -45,6 +45,9 @@ __KERNEL_RCSID(0, "$NetBSD$");
 
 #include <uvm/uvm_extern.h>
 
+#define	AUXVLEN		10
+#define	CANARYLEN	64
+
 extern struct sysent cloudabi64_sysent[];
 
 static void
@@ -171,20 +174,37 @@ static int
 cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
     struct ps_strings *arginfo, char **stackp, void *argp)
 {
-	/* TODO(ed): Use proper offset instead of 0x400000. */
-	Elf_Ehdr *eh = pack->ep_hdr;
-	/* Write out an auxiliary vector. */
-	cloudabi64_auxv_t auxv[] = {
+	char canarybuf[CANARYLEN];
+	Elf_Ehdr *eh;
+	const char *endp;
+	size_t i, argdatalen;
+	int error;
+
+	/*
+	 * Compute length of program arguments. As the argument data is
+	 * binary safe, we had to add a trailing null byte. Undo this by
+	 * reducing the length.
+	 */
+	endp = argp;
+	for (i = 0; i < arginfo->ps_nargvstr; ++i)
+		endp += strlen(endp) + 1;
+	argdatalen = endp - (const char *)argp;
+	if (argdatalen > 0)
+		--argdatalen;
+
+	/* Copy out the auxiliary vector. */
+	eh = pack->ep_hdr;
+	cloudabi64_auxv_t auxv[AUXVLEN] = {
 #define	VAL(type, val)	{ .a_type = (type), .a_val = (val) }
 #define	PTR(type, ptr)	{ .a_type = (type), .a_ptr = (uintptr_t)(ptr) }
-#if 0
-		PTR(CLOUDABI_AT_ARGDATA, argdata),
+		PTR(CLOUDABI_AT_ARGDATA,
+		    *stackp + sizeof(auxv) + sizeof(canarybuf)),
 		VAL(CLOUDABI_AT_ARGDATALEN, argdatalen),
-		PTR(CLOUDABI_AT_CANARY, canary),
+		PTR(CLOUDABI_AT_CANARY, *stackp + sizeof(auxv)),
 		VAL(CLOUDABI_AT_CANARYLEN, sizeof(canarybuf)),
-#endif
 		VAL(CLOUDABI_AT_NCPUS, ncpu),
 		VAL(CLOUDABI_AT_PAGESZ, PAGE_SIZE),
+		/* TODO(ed): Use proper offset instead of 0x400000. */
 		PTR(CLOUDABI_AT_PHDR, eh->e_phoff + 0x400000),
 		VAL(CLOUDABI_AT_PHNUM, eh->e_phnum),
 		VAL(CLOUDABI_AT_TID, cloudabi_gettid(l)),
@@ -192,9 +212,24 @@ cloudabi64_copyargs(struct lwp *l, struct exec_package *pack,
 #undef PTR
 		{ .a_type = CLOUDABI_AT_NULL },
 	};
+	error = copyout(auxv, *stackp, sizeof(auxv));
+	if (error != 0)
+		return (error);
+	*stackp += sizeof(auxv);
 
-	/* TODO(ed): Is this done at the right offset? */
-	return (copyout(auxv, *stackp, sizeof(auxv)));
+	/* Copy out the canary buffer for stack smashing protection. */
+	cprng_fast(canarybuf, sizeof(canarybuf));
+	error = copyout(canarybuf, *stackp, sizeof(canarybuf));
+	if (error != 0)
+		return (error);
+	*stackp += sizeof(canarybuf);
+
+	/* Copy out the argument data. */
+	error = copyout(argp, *stackp, argdatalen);
+	if (error != 0)
+		return (error);
+	*stackp += argdatalen;
+	return (0);
 }
 
 static struct emul cloudabi64_emul = {
@@ -244,7 +279,7 @@ static struct execsw cloudabi64_execsw = {
 	.u.elf_probe_func	= cloudabi64_elf_probe,
 	.es_emul		= &cloudabi64_emul,
 	.es_prio		= EXECSW_PRIO_ANY,
-	.es_arglen		= 0,
+	.es_arglen	      = sizeof(cloudabi64_auxv_t) * AUXVLEN + CANARYLEN,
 	.es_copyargs		= cloudabi64_copyargs,
 	.es_setregs		= NULL,
 	.es_coredump		= coredump_elf64,
