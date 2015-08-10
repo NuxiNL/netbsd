@@ -361,7 +361,7 @@ cloudabi_sys_sock_stat_get(struct lwp *l,
 	}
 
 	/* Set ss_error. */
-	ss.ss_error = so->so_error;
+	ss.ss_error = cloudabi_convert_errno(so->so_error);
 	if ((SCARG(uap, flags) & CLOUDABI_SOCKSTAT_CLEAR_ERROR) != 0)
 		so->so_error = 0;
 
