@@ -217,10 +217,7 @@ cloudabi64_kevent_put_events(void *arg, struct kevent *kevp,
 			}
 		} else {
 			/* Error. */
-			if (kevp->data == ENOTCAPABLE)
-				ev.error = CLOUDABI_EINVAL;
-			else
-				ev.error = cloudabi_convert_errno(kevp->data);
+			ev.error = cloudabi_convert_errno(kevp->data);
 		}
 		++kevp;
 

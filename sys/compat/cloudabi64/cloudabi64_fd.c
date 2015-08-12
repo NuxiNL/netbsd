@@ -51,14 +51,12 @@ cloudabi64_sys_fd_pread(struct lwp *l,
     const struct cloudabi64_sys_fd_pread_args *uap, register_t *retval)
 {
 	struct sys_preadv_args sys_preadv_args;
-	int error;
 
 	SCARG(&sys_preadv_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_preadv_args, iovp) = (const struct iovec *)SCARG(uap, iov);
 	SCARG(&sys_preadv_args, iovcnt) = SCARG(uap, iovcnt);
 	SCARG(&sys_preadv_args, offset) = SCARG(uap, offset);
-	error = sys_preadv(l, &sys_preadv_args, retval);
-	return (error == ENOTCAPABLE ? EBADF : error);
+	return (sys_preadv(l, &sys_preadv_args, retval));
 }
 
 int
@@ -66,14 +64,12 @@ cloudabi64_sys_fd_pwrite(struct lwp *l,
     const struct cloudabi64_sys_fd_pwrite_args *uap, register_t *retval)
 {
 	struct sys_pwritev_args sys_pwritev_args;
-	int error;
 
 	SCARG(&sys_pwritev_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_pwritev_args, iovp) = (const struct iovec *)SCARG(uap, iov);
 	SCARG(&sys_pwritev_args, iovcnt) = SCARG(uap, iovcnt);
 	SCARG(&sys_pwritev_args, offset) = SCARG(uap, offset);
-	error = sys_pwritev(l, &sys_pwritev_args, retval);
-	return (error == ENOTCAPABLE ? EBADF : error);
+	return (sys_pwritev(l, &sys_pwritev_args, retval));
 }
 
 int
@@ -81,13 +77,11 @@ cloudabi64_sys_fd_read(struct lwp *l,
     const struct cloudabi64_sys_fd_read_args *uap, register_t *retval)
 {
 	struct sys_readv_args sys_readv_args;
-	int error;
 
 	SCARG(&sys_readv_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_readv_args, iovp) = (const struct iovec *)SCARG(uap, iov);
 	SCARG(&sys_readv_args, iovcnt) = SCARG(uap, iovcnt);
-	error = sys_readv(l, &sys_readv_args, retval);
-	return (error == ENOTCAPABLE ? EBADF : error);
+	return (sys_readv(l, &sys_readv_args, retval));
 }
 
 int
@@ -95,11 +89,9 @@ cloudabi64_sys_fd_write(struct lwp *l,
     const struct cloudabi64_sys_fd_write_args *uap, register_t *retval)
 {
 	struct sys_writev_args sys_writev_args;
-	int error;
 
 	SCARG(&sys_writev_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_writev_args, iovp) = (const struct iovec *)SCARG(uap, iov);
 	SCARG(&sys_writev_args, iovcnt) = SCARG(uap, iovcnt);
-	error = sys_writev(l, &sys_writev_args, retval);
-	return (error == ENOTCAPABLE ? EBADF : error);
+	return (sys_writev(l, &sys_writev_args, retval));
 }

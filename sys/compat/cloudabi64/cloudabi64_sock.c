@@ -112,7 +112,7 @@ cloudabi64_sys_sock_send(struct lwp *l,
 
 	error = do_sys_sendmsg(l, SCARG(uap, s), &msghdr, flags, retval2);
 	if (error != 0)
-		return (error == ENOTCAPABLE ? ENOTSOCK : error);
+		return (error);
 
 	/* Convert results in msghdr to cloudabi_send_out_t. */
 	memset(&so, '\0', sizeof(so));

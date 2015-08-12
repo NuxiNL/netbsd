@@ -502,8 +502,7 @@ cloudabi_sys_file_readdir(struct lwp *l,
 
 	error = fd_getvnode(SCARG(uap, fd), CAP_GETDENTS, &fp);
 	if (error != 0)
-		return (error == EINVAL || error == ENOTCAPABLE ?
-		    ENOTDIR : error);
+		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(SCARG(uap, fd));

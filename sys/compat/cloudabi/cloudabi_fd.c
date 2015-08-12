@@ -219,11 +219,9 @@ cloudabi_sys_fd_datasync(struct lwp *l,
     const struct cloudabi_sys_fd_datasync_args *uap, register_t *retval)
 {
 	struct sys_fdatasync_args sys_fdatasync_args;
-	int error;
 
 	SCARG(&sys_fdatasync_args, fd) = SCARG(uap, fd);
-	error = sys_fdatasync(l, &sys_fdatasync_args, retval);
-	return (error == ENOTCAPABLE ? EBADF : error);
+	return (sys_fdatasync(l, &sys_fdatasync_args, retval));
 }
 
 int
@@ -255,7 +253,6 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
     register_t *retval)
 {
 	struct sys_lseek_args sys_lseek_args;
-	int error;
 
 	SCARG(&sys_lseek_args, fd) = SCARG(uap, fd);
 	SCARG(&sys_lseek_args, offset) = SCARG(uap, offset);
@@ -274,8 +271,7 @@ cloudabi_sys_fd_seek(struct lwp *l, const struct cloudabi_sys_fd_seek_args *uap,
 		return (EINVAL);
 	}
 
-	error = sys_lseek(l, &sys_lseek_args, retval);
-	return (error == ENOTCAPABLE ? ESPIPE : error);
+	return (sys_lseek(l, &sys_lseek_args, retval));
 }
 
 /* Converts a file descriptor to a CloudABI file descriptor type. */
@@ -596,9 +592,7 @@ cloudabi_sys_fd_sync(struct lwp *l, const struct cloudabi_sys_fd_sync_args *uap,
     register_t *retval)
 {
 	struct sys_fsync_args sys_fsync_args;
-	int error;
 
 	SCARG(&sys_fsync_args, fd) = SCARG(uap, fd);
-	error = sys_fsync(l, &sys_fsync_args, retval);
-	return (error == ENOTCAPABLE ? EINVAL : error);
+	return (sys_fsync(l, &sys_fsync_args, retval));
 }
