@@ -39,6 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_file.c,v 1.115 2015/03/01 13:19:39 njoly Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -173,12 +174,12 @@ linux_open_ctty(struct lwp *l, int flags, int fd)
 	 * this the controlling terminal.
 	 */
         if (!(flags & O_NOCTTY) && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
-                file_t *fp;
+		cap_rights_t rights;
+		file_t *fp;
 
-		fp = fd_getfile(fd);
-
-                /* ignore any error, just give it a try */
-                if (fp != NULL) {
+		/* ignore any error, just give it a try */
+		if (fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+		    &fp) == 0) {
 			if (fp->f_type == DTYPE_VNODE) {
 				(fp->f_ops->fo_ioctl) (fp, TIOCSCTTY, NULL);
 			}
@@ -257,6 +258,7 @@ linux_sys_fcntl(struct lwp *l, const struct linux_sys_fcntl_args *uap, register_
 		syscallarg(int) cmd;
 		syscallarg(void *) arg;
 	} */
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	int fd, cmd, error;
 	u_long val;
@@ -317,8 +319,9 @@ linux_sys_fcntl(struct lwp *l, const struct linux_sys_fcntl_args *uap, register_
 		 * so that F_GETFL would report the ASYNC i/o is on.
 		 */
 		if (val & O_ASYNC) {
-			if (((fp1 = fd_getfile(fd)) == NULL))
-			    return (EBADF);
+			if ((error = fd_getfile(SCARG(uap, fd),
+			    cap_rights_init(&rights), &fp1)) != 0)
+				return error;
 			if (((fp1->f_type == DTYPE_SOCKET) && fp1->f_data
 			      && ((struct socket *)fp1->f_data)->so_state & SS_ISAPIPE)
 			    || (fp1->f_type == DTYPE_PIPE))
@@ -364,8 +367,9 @@ linux_sys_fcntl(struct lwp *l, const struct linux_sys_fcntl_args *uap, register_
 		 * restrictive for Linux F_{G,S}ETOWN. For non-tty descriptors,
 		 * this is not a problem.
 		 */
-		if ((fp = fd_getfile(fd)) == NULL)
-			return EBADF;
+		if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FSTAT),
+		    &fp)) != 0)
+			return error;
 
 		/* Check it's a character device vnode */
 		if (fp->f_type != DTYPE_VNODE

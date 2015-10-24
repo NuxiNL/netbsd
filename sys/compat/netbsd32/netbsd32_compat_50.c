@@ -44,6 +44,7 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_50.c,v 1.30 2015/07/24 13:02:52 maxv
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -285,6 +286,7 @@ compat_50_netbsd32_futimes(struct lwp *l,
 		syscallarg(int) fd;
 		syscallarg(const netbsd32_timeval50p_t) tptr;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 	struct timeval tv[2], *tvp;
@@ -294,7 +296,8 @@ compat_50_netbsd32_futimes(struct lwp *l,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FUTIMES), &fp)) != 0)
 		return error;
 
 	error = do_sys_utimes(l, fp->f_vnode, NULL, 0, tvp, UIO_SYSSPACE);

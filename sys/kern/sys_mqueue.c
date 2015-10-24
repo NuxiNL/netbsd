@@ -49,6 +49,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_mqueue.c,v 1.39 2015/06/29 15:44:45 christos Exp
 #include <sys/types.h>
 #include <sys/atomic.h>
 
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/kauth.h>
@@ -285,16 +286,15 @@ mqueue_lookup(const char *name)
  * => holds a reference on the file descriptor.
  */
 int
-mqueue_get(mqd_t mqd, int fflag, mqueue_t **mqret)
+mqueue_get(mqd_t mqd, const cap_rights_t *rights, int fflag, mqueue_t **mqret)
 {
 	const int fd = (int)mqd;
 	mqueue_t *mq;
 	file_t *fp;
+	int error;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL)) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, rights, &fp)) != 0)
+		return error;
 	if (__predict_false(fp->f_type != DTYPE_MQUEUE)) {
 		fd_putfile(fd);
 		return EBADF;
@@ -644,13 +644,15 @@ int
 mq_recv1(mqd_t mqdes, void *msg_ptr, size_t msg_len, u_int *msg_prio,
     struct timespec *ts, ssize_t *mlen)
 {
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct mq_msg *msg = NULL;
 	struct mq_attr *mqattr;
 	u_int idx;
 	int error;
 
-	error = mqueue_get(mqdes, FREAD, &mq);
+	error = mqueue_get(mqdes, cap_rights_init(&rights, CAP_READ),
+	    FREAD, &mq);
 	if (error) {
 		return error;
 	}
@@ -798,6 +800,7 @@ int
 mq_send1(mqd_t mqdes, const char *msg_ptr, size_t msg_len, u_int msg_prio,
     struct timespec *ts)
 {
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct mq_msg *msg;
 	struct mq_attr *mqattr;
@@ -830,7 +833,8 @@ mq_send1(mqd_t mqdes, const char *msg_ptr, size_t msg_len, u_int msg_prio,
 	msg->msg_len = msg_len;
 	msg->msg_prio = msg_prio;
 
-	error = mqueue_get(mqdes, FWRITE, &mq);
+	error = mqueue_get(mqdes, cap_rights_init(&rights, CAP_WRITE),
+	    FREAD, &mq);
 	if (error) {
 		mqueue_freemsg(msg, size);
 		return error;
@@ -968,6 +972,7 @@ sys_mq_notify(struct lwp *l, const struct sys_mq_notify_args *uap,
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const struct sigevent *) notification;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct sigevent sig;
 	int error;
@@ -983,7 +988,8 @@ sys_mq_notify(struct lwp *l, const struct sys_mq_notify_args *uap,
 			return EINVAL;
 	}
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_EVENT), 0, &mq);
 	if (error) {
 		return error;
 	}
@@ -1015,11 +1021,13 @@ sys_mq_getattr(struct lwp *l, const struct sys_mq_getattr_args *uap,
 		syscallarg(mqd_t) mqdes;
 		syscallarg(struct mq_attr *) mqstat;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct mq_attr attr;
 	int error;
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_MQ_GETATTR), 0, &mq);
 	if (error) {
 		return error;
 	}
@@ -1039,6 +1047,7 @@ sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
 		syscallarg(const struct mq_attr *) mqstat;
 		syscallarg(struct mq_attr *) omqstat;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct mq_attr attr;
 	int error, nonblock;
@@ -1048,7 +1057,8 @@ sys_mq_setattr(struct lwp *l, const struct sys_mq_setattr_args *uap,
 		return error;
 	nonblock = (attr.mq_flags & O_NONBLOCK);
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_MQ_SETATTR), 0, &mq);
 	if (error) {
 		return error;
 	}

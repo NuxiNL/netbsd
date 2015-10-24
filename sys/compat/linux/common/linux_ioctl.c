@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_ioctl.c,v 1.58 2014/03/23 06:03:38 dholland Ex
 #endif
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/conf.h>
@@ -153,14 +154,16 @@ linux_sys_ioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, register_
 		 * way.  We do it by indexing in the cdevsw with the major
 		 * device number and check if that is the sequencer entry.
 		 */
+		cap_rights_t rights;
 		bool is_sequencer = false;
 		struct file *fp;
 		struct vnode *vp;
 		struct vattr va;
 		extern const struct cdevsw sequencer_cdevsw;
 
-		if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-			return EBADF;
+		if ((error = fd_getfile(SCARG(uap, fd),
+		    cap_rights_init(&rights, CAP_FSTAT), &fp)) != 0)
+			return error;
 		if (fp->f_type == DTYPE_VNODE &&
 		    (vp = (struct vnode *)fp->f_data) != NULL &&
 		    vp->v_type == VCHR) {

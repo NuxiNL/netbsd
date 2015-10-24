@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_socket.c,v 1.20 2015/07/24 13:02:52 maxv Exp
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/fstypes.h>
 #include <sys/signal.h>
 #include <sys/dirent.h>
@@ -467,6 +468,7 @@ int
 linux32_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
     void *data)
 {
+	cap_rights_t rights;
 	struct linux32_ifreq lreq;
 	file_t *fp;
 	struct ifaddr *ifa;
@@ -486,7 +488,8 @@ linux32_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	 * So, we must duplicate code from sys_ioctl() and ifconf().  Ugh.
 	 */
 
-	if ((fp = fd_getfile(fd)) == NULL)
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+	    &fp)) != 0)
 		return (EBADF);
 
 	KERNEL_LOCK(1, NULL);
@@ -588,6 +591,7 @@ linux32_ioctl_socket(struct lwp *l, const struct linux32_sys_ioctl_args *uap, re
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	u_long com;
 	int error = 0, isdev = 0, dosys = 1;
 	struct netbsd32_ioctl_args ia;
@@ -596,8 +600,9 @@ linux32_ioctl_socket(struct lwp *l, const struct linux32_sys_ioctl_args *uap, re
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct ioctl_pt pt;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if (fp->f_type == DTYPE_VNODE) {
 		vp = (struct vnode *)fp->f_data;

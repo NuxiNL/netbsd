@@ -36,6 +36,7 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_mqueue.c,v 1.5 2015/06/30 11:56:27 christos
 #endif
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/dirent.h>
 #include <sys/filedesc.h>
 #include <sys/fcntl.h>
@@ -105,12 +106,14 @@ netbsd32_mq_getattr(struct lwp *l, const struct netbsd32_mq_getattr_args *uap,
 		syscallarg(mqd_t) mqdes;
 		syscallarg(netbsd32_mq_attrp_t) mqstat;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct mq_attr attr;
 	struct netbsd32_mq_attr a32;
 	int error;
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_MQ_GETATTR), 0, &mq);
 	if (error)
 		return error;
 
@@ -130,6 +133,7 @@ netbsd32_mq_setattr(struct lwp *l, const struct netbsd32_mq_setattr_args *uap,
 		syscallarg(const netbsd32_mq_attrp_t) mqstat;
 		syscallarg(netbsd32_mq_attrp_t) omqstat;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct netbsd32_mq_attr attr32;
 	struct mq_attr attr;
@@ -141,7 +145,8 @@ netbsd32_mq_setattr(struct lwp *l, const struct netbsd32_mq_setattr_args *uap,
 	netbsd32_to_mq_attr(&attr32, &attr);
 	nonblock = (attr.mq_flags & O_NONBLOCK);
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_MQ_SETATTR), 0, &mq);
 	if (error)
 		return error;
 
@@ -180,6 +185,7 @@ netbsd32_mq_notify(struct lwp *l, const struct netbsd32_mq_notify_args *uap,
 		syscallarg(mqd_t) mqdes;
 		syscallarg(const netbsd32_sigeventp_t) notification;
 	} */
+	cap_rights_t rights;
 	struct mqueue *mq;
 	struct netbsd32_sigevent sig32;
 	int error;
@@ -195,7 +201,8 @@ netbsd32_mq_notify(struct lwp *l, const struct netbsd32_mq_notify_args *uap,
 			return EINVAL;
 	}
 
-	error = mqueue_get(SCARG(uap, mqdes), 0, &mq);
+	error = mqueue_get(SCARG(uap, mqdes),
+	    cap_rights_init(&rights, CAP_EVENT), 0, &mq);
 	if (error) {
 		return error;
 	}

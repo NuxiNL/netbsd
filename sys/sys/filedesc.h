@@ -177,6 +177,11 @@ struct fileops;
 struct socket;
 struct proc;
 
+#ifndef _CAP_RIGHTS_T_DECLARED
+#define	_CAP_RIGHTS_T_DECLARED
+typedef struct cap_rights cap_rights_t;
+#endif
+
 /*
  * Kernel global variables and routines.
  */
@@ -196,12 +201,13 @@ void	fd_free(void);
 void	fd_closeexec(void);
 void	fd_ktrexecfd(void);
 int	fd_checkstd(void);
-file_t	*fd_getfile(unsigned);
+int	fd_getfile(unsigned, const cap_rights_t *, file_t **);
 file_t	*fd_getfile2(proc_t *, unsigned);
 void	fd_putfile(unsigned);
-int	fd_getvnode(unsigned, file_t **);
-int	fd_getsock(unsigned, struct socket **);
-int	fd_getsock1(unsigned, struct socket **, file_t **);
+int	fd_getvnode(unsigned, const cap_rights_t *, file_t **);
+int	fd_getsock(unsigned, const cap_rights_t *, struct socket **);
+int	fd_getsock1(unsigned, const cap_rights_t *, struct socket **,
+    file_t **);
 void	fd_putvnode(unsigned);
 void	fd_putsock(unsigned);
 int	fd_close(unsigned);

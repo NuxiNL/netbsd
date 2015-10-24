@@ -30,6 +30,7 @@
 __KERNEL_RCSID(0, "$NetBSD: ossaudio.c,v 1.69 2014/09/05 09:21:55 matt Exp $");
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/file.h>
@@ -169,6 +170,7 @@ oss_ioctl_audio(struct lwp *l, const struct oss_sys_ioctl_args *uap, register_t 
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	u_long com;
 	struct audio_info tmpinfo;
@@ -178,11 +180,12 @@ oss_ioctl_audio(struct lwp *l, const struct oss_sys_ioctl_args *uap, register_t 
 	struct audio_encoding tmpenc;
 	u_int u;
 	int idat, idata;
-	int error = 0;
+	int error;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;
@@ -1034,6 +1037,7 @@ oss_ioctl_mixer(struct lwp *lwp, const struct oss_sys_ioctl_args *uap, register_
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	u_long com;
 	struct audiodevinfo *di;
@@ -1046,7 +1050,8 @@ oss_ioctl_mixer(struct lwp *lwp, const struct oss_sys_ioctl_args *uap, register_
 	int l, r, n, e;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
 		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
@@ -1282,6 +1287,7 @@ oss_ioctl_sequencer(struct lwp *l, const struct oss_sys_ioctl_args *uap, registe
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	u_long com;
 	int idat, idat1;
@@ -1291,8 +1297,9 @@ oss_ioctl_sequencer(struct lwp *l, const struct oss_sys_ioctl_args *uap, registe
 	int error;
 	int (*ioctlf)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;

@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_termios.c,v 1.14 2008/11/19 18:36:04 ad Exp 
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/time.h>
 #include <sys/ucred.h>
 #include <sys/proc.h>
@@ -74,6 +75,7 @@ linux32_ioctl_termios(struct lwp *l, const struct linux32_sys_ioctl_args *uap, r
 		syscallarg(netbsd32_u_long) com;
 		syscallarg(netbsd32_charp) data;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	u_long com;
 	struct linux32_termio tmplt;
@@ -85,8 +87,9 @@ linux32_ioctl_termios(struct lwp *l, const struct linux32_sys_ioctl_args *uap, r
 	char tioclinux;
 	int (*bsdioctl)(file_t *, u_long, void *);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		fd_putfile(SCARG(uap, fd));

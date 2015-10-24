@@ -39,6 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: nfs_syscalls.c,v 1.156 2015/06/22 10:35:00 mrg Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/kernel.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -179,6 +180,7 @@ sys_nfssvc(struct lwp *l, const struct sys_nfssvc_args *uap, register_t *retval)
 int
 do_nfssvc(struct nfssvc_copy_ops *ops, struct lwp *l, int flag, void *argp, register_t *retval)
 {
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 	struct mbuf *nam;
@@ -209,8 +211,9 @@ do_nfssvc(struct nfssvc_copy_ops *ops, struct lwp *l, int flag, void *argp, regi
 		if (error)
 			return (error);
 		/* getsock() will use the descriptor for us */
-		if ((fp = fd_getfile(nfsdarg.sock)) == NULL)
-			return (EBADF);
+		if ((error = fd_getfile(nfsdarg.sock,
+		    cap_rights_init(&rights, CAP_SOCK_SERVER), &fp)) != 0)
+			return error;
 		if (fp->f_type != DTYPE_SOCKET) {
 			fd_putfile(nfsdarg.sock);
 			return (ENOTSOCK);

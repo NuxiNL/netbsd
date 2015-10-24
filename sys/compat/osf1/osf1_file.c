@@ -66,6 +66,7 @@ __KERNEL_RCSID(0, "$NetBSD: osf1_file.c,v 1.43 2014/09/05 09:21:54 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -136,6 +137,7 @@ osf1_sys_getdirentries(struct lwp *l, const struct osf1_sys_getdirentries_args *
 		syscallarg(int) nbytes;
 		syscallarg(long *) basep;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *buf;        /* BSD-format */
@@ -157,7 +159,8 @@ osf1_sys_getdirentries(struct lwp *l, const struct osf1_sys_getdirentries_args *
 		return 0;
 
 	fd = SCARG(uap, fd);
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_READDIR),
+	    &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;

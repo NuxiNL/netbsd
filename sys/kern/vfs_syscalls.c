@@ -79,6 +79,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_syscalls.c,v 1.500 2015/07/24 13:02:52 maxv Exp 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
@@ -135,9 +136,10 @@ static int do_sys_readlinkat(struct lwp *, int, const char *, char *,
     size_t, register_t *);
 static int do_sys_unlinkat(struct lwp *, int, const char *, int, enum uio_seg);
 
-static int fd_nameiat(struct lwp *, int, struct nameidata *);
-static int fd_nameiat_simple_user(struct lwp *, int, const char *,
-    namei_simple_flags_t, struct vnode **);
+static int fd_nameiat(struct lwp *, int, const cap_rights_t *,
+    struct nameidata *);
+static int fd_nameiat_simple_user(struct lwp *, int, const cap_rights_t *,
+    const char *, namei_simple_flags_t, struct vnode **);
 
 
 /*
@@ -164,13 +166,14 @@ const char * const mountcompatnames[] = {
 const int nmountcompatnames = __arraycount(mountcompatnames);
 
 static int 
-fd_nameiat(struct lwp *l, int fdat, struct nameidata *ndp)
+fd_nameiat(struct lwp *l, int fdat, const cap_rights_t *rights,
+    struct nameidata *ndp)
 {
 	file_t *dfp;
 	int error;
 
 	if (fdat != AT_FDCWD) {
-		if ((error = fd_getvnode(fdat, &dfp)) != 0)
+		if ((error = fd_getvnode(fdat, rights, &dfp)) != 0)
 			goto out;
 
 		NDAT(ndp, dfp->f_vnode);
@@ -185,15 +188,15 @@ out:
 }
 
 static int
-fd_nameiat_simple_user(struct lwp *l, int fdat, const char *path,
-    namei_simple_flags_t sflags, struct vnode **vp_ret)
+fd_nameiat_simple_user(struct lwp *l, int fdat, const cap_rights_t *rights,
+    const char *path, namei_simple_flags_t sflags, struct vnode **vp_ret)
 {
 	file_t *dfp;
 	struct vnode *dvp;
 	int error;
 
 	if (fdat != AT_FDCWD) {
-		if ((error = fd_getvnode(fdat, &dfp)) != 0)
+		if ((error = fd_getvnode(fdat, rights, &dfp)) != 0)
 			goto out;
 
 		dvp = dfp->f_vnode;
@@ -1193,12 +1196,14 @@ sys_statvfs1(struct lwp *l, const struct sys_statvfs1_args *uap, register_t *ret
 int
 do_sys_fstatvfs(struct lwp *l, int fd, int flags, struct statvfs *sb)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_FSTATFS),
+	    &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	error = dostatvfs(mp, sb, curlwp, flags, 1);
@@ -1317,6 +1322,7 @@ sys_fchdir(struct lwp *l, const struct sys_fchdir_args *uap, register_t *retval)
 	/* {
 		syscallarg(int) fd;
 	} */
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct cwdinfo *cwdi;
 	struct vnode *vp, *tdp;
@@ -1326,7 +1332,8 @@ sys_fchdir(struct lwp *l, const struct sys_fchdir_args *uap, register_t *retval)
 
 	/* fd_getvnode() will use the descriptor for us */
 	fd = SCARG(uap, fd);
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_FCHDIR),
+	    &fp)) != 0)
 		return (error);
 	vp = fp->f_vnode;
 
@@ -1380,6 +1387,7 @@ sys_fchdir(struct lwp *l, const struct sys_fchdir_args *uap, register_t *retval)
 int
 sys_fchroot(struct lwp *l, const struct sys_fchroot_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct vnode	*vp;
 	file_t	*fp;
@@ -1389,7 +1397,8 @@ sys_fchroot(struct lwp *l, const struct sys_fchroot_args *uap, register_t *retva
  	    KAUTH_REQ_SYSTEM_CHROOT_FCHROOT, NULL, NULL, NULL)) != 0)
 		return error;
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_FCHROOT),
+	    &fp)) != 0)
 		return error;
 	vp = fp->f_vnode;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
@@ -1629,6 +1638,7 @@ static int
 do_sys_openat(lwp_t *l, int fdat, const char *path, int flags,
     int mode, int *fd)
 {
+	cap_rights_t rights;
 	file_t *dfp = NULL;
 	struct vnode *dvp = NULL;
 	struct pathbuf *pb;
@@ -1648,8 +1658,32 @@ do_sys_openat(lwp_t *l, int fdat, const char *path, int flags,
 	}
 
 	if (fdat != AT_FDCWD) {
+		/* Determine which rights need to be present. */
+		cap_rights_init(&rights, CAP_LOOKUP);
+		switch (flags & O_ACCMODE) {
+		case O_RDONLY:
+			cap_rights_set(&rights, CAP_READ);
+			break;
+		case O_RDWR:
+			cap_rights_set(&rights, CAP_READ);
+			/* FALLTHROUGH */
+		case O_WRONLY:
+			cap_rights_set(&rights, CAP_WRITE);
+			if (!(flags & (O_APPEND | O_TRUNC)))
+				cap_rights_set(&rights, CAP_SEEK);
+			break;
+		}
+		if (flags & O_CREAT)
+			cap_rights_set(&rights, CAP_CREATE);
+		if (flags & O_TRUNC)
+			cap_rights_set(&rights, CAP_FTRUNCATE);
+		if (flags & (O_SYNC | O_FSYNC | O_DSYNC | O_RSYNC))
+			cap_rights_set(&rights, CAP_FSYNC);
+		if (flags & (O_EXLOCK | O_SHLOCK))
+			cap_rights_set(&rights, CAP_FLOCK);
+
 		/* fd_getvnode() will use the descriptor for us */
-		if ((error = fd_getvnode(fdat, &dfp)) != 0)
+		if ((error = fd_getvnode(fdat, &rights, &dfp)) != 0)
 			goto out;
 
 		dvp = dfp->f_vnode;
@@ -2185,6 +2219,7 @@ int
 do_sys_mknodat(struct lwp *l, int fdat, const char *pathname, mode_t mode,
     dev_t dev, register_t *retval, enum uio_seg seg)
 {
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2211,7 +2246,8 @@ do_sys_mknodat(struct lwp *l, int fdat, const char *pathname, mode_t mode,
 
 	NDINIT(&nd, CREATE, LOCKPARENT | TRYEMULROOT, pb);
 
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0)
+	if ((error = fd_nameiat(l, fdat, cap_rights_init(&rights, CAP_MKNODAT),
+	    &nd)) != 0)
 		goto out;
 	vp = nd.ni_vp;
 
@@ -2324,6 +2360,7 @@ sys_mkfifoat(struct lwp *l, const struct sys_mkfifoat_args *uap,
 static int
 do_sys_mkfifoat(struct lwp *l, int fdat, const char *path, mode_t mode)
 {
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct vattr vattr;
 	int error;
@@ -2336,7 +2373,8 @@ do_sys_mkfifoat(struct lwp *l, int fdat, const char *path, mode_t mode)
 	}
 	NDINIT(&nd, CREATE, LOCKPARENT | TRYEMULROOT, pb);
 
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0) {
+	if ((error = fd_nameiat(l, fdat, cap_rights_init(&rights, CAP_MKFIFOAT),
+	    &nd)) != 0) {
 		pathbuf_destroy(pb);
 		return error;
 	}
@@ -2370,6 +2408,7 @@ int
 do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
     const char *link, int follow, register_t *retval) 
 {
+	cap_rights_t rights;
 	struct vnode *vp;
 	struct pathbuf *linkpb;
 	struct nameidata nd;
@@ -2381,7 +2420,8 @@ do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
 	else
 		ns_flags = NSM_NOFOLLOW_TRYEMULROOT;
 
-	error = fd_nameiat_simple_user(l, fdpath, path, ns_flags, &vp);
+	error = fd_nameiat_simple_user(l, fdpath,
+	    cap_rights_init(&rights, CAP_LINKAT_SOURCE), path, ns_flags, &vp);
 	if (error != 0)
 		return (error);
 	error = pathbuf_copyin(link, &linkpb);
@@ -2389,7 +2429,8 @@ do_sys_linkat(struct lwp *l, int fdpath, const char *path, int fdlink,
 		goto out1;
 	}
 	NDINIT(&nd, CREATE, LOCKPARENT | TRYEMULROOT, linkpb);
-	if ((error = fd_nameiat(l, fdlink, &nd)) != 0)
+	if ((error = fd_nameiat(l, fdlink,
+	    cap_rights_init(&rights, CAP_LINKAT_TARGET), &nd)) != 0)
 		goto out2;
 	if (nd.ni_vp) {
 		error = EEXIST;
@@ -2471,6 +2512,7 @@ static int
 do_sys_symlinkat(struct lwp *l, const char *patharg, int fdat,
     const char *link, enum uio_seg seg)
 {
+	cap_rights_t rights;
 	struct proc *p = curproc;
 	struct vattr vattr;
 	char *path;
@@ -2498,7 +2540,8 @@ do_sys_symlinkat(struct lwp *l, const char *patharg, int fdat,
 	ktrkuser("symlink-target", path, strlen(path));
 
 	NDINIT(&nd, CREATE, LOCKPARENT | TRYEMULROOT, linkpb);
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0)
+	if ((error = fd_nameiat(l, fdat,
+	    cap_rights_init(&rights, CAP_SYMLINKAT), &nd)) != 0)
 		goto out2;
 	if (nd.ni_vp) {
 		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
@@ -2637,6 +2680,7 @@ static int
 do_sys_unlinkat(struct lwp *l, int fdat, const char *arg, int flags,
     enum uio_seg seg)
 {
+	cap_rights_t rights;
 	struct vnode *vp;
 	int error;
 	struct pathbuf *pb;
@@ -2656,7 +2700,8 @@ do_sys_unlinkat(struct lwp *l, int fdat, const char *arg, int flags,
 	}
 
 	NDINIT(&nd, DELETE, LOCKPARENT | LOCKLEAF | TRYEMULROOT, pb);
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0)
+	if ((error = fd_nameiat(l, fdat, cap_rights_init(&rights, CAP_UNLINKAT),
+	    &nd)) != 0)
 		goto out;
 	vp = nd.ni_vp;
 
@@ -2741,6 +2786,7 @@ sys_lseek(struct lwp *l, const struct sys_lseek_args *uap, register_t *retval)
 		syscallarg(off_t) offset;
 		syscallarg(int) whence;
 	} */
+	cap_rights_t rights;
 	kauth_cred_t cred = l->l_cred;
 	file_t *fp;
 	struct vnode *vp;
@@ -2750,8 +2796,11 @@ sys_lseek(struct lwp *l, const struct sys_lseek_args *uap, register_t *retval)
 
 	fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	cap_rights_init(&rights, CAP_SEEK_TELL);
+	if (SCARG(uap, whence) != SEEK_CUR || SCARG(uap, offset) != 0)
+		cap_rights_set(&rights, CAP_SEEK);
+	if ((error = fd_getfile(fd, &rights, &fp)) != 0)
+		return error;
 
 	vp = fp->f_vnode;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
@@ -2799,13 +2848,15 @@ sys_pread(struct lwp *l, const struct sys_pread_args *uap, register_t *retval)
 		syscallarg(size_t) nbyte;
 		syscallarg(off_t) offset;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_PREAD),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -2866,13 +2917,15 @@ sys_pwrite(struct lwp *l, const struct sys_pwrite_args *uap, register_t *retval)
 		syscallarg(size_t) nbyte;
 		syscallarg(off_t) offset;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_PWRITE),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -2940,6 +2993,7 @@ int
 do_sys_accessat(struct lwp *l, int fdat, const char *path,
     int mode, int flags)
 {
+	cap_rights_t rights;
 	kauth_cred_t cred;
 	struct vnode *vp;
 	int error, nd_flag, vmode;
@@ -2970,7 +3024,8 @@ do_sys_accessat(struct lwp *l, int fdat, const char *path,
 	}
 	nd.ni_cnd.cn_cred = cred;
 
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0) {
+	if ((error = fd_nameiat(l, fdat,
+	    cap_rights_init(&rights, CAP_FACCESSAT), &nd)) != 0) {
 		pathbuf_destroy(pb);
 		goto out;
 	}
@@ -3026,6 +3081,7 @@ int
 do_sys_statat(struct lwp *l, int fdat, const char *userpath,
     unsigned int nd_flag, struct stat *sb) 
 {
+	cap_rights_t rights;
 	int error;
 	struct pathbuf *pb;
 	struct nameidata nd;
@@ -3039,7 +3095,7 @@ do_sys_statat(struct lwp *l, int fdat, const char *userpath,
 
 	NDINIT(&nd, LOOKUP, nd_flag | LOCKLEAF | TRYEMULROOT, pb);
 
-	error = fd_nameiat(l, fdat, &nd);
+	error = fd_nameiat(l, fdat, cap_rights_init(&rights, CAP_FSTATAT), &nd);
 	if (error != 0) {
 		pathbuf_destroy(pb);
 		return error;
@@ -3167,6 +3223,7 @@ static int
 do_sys_readlinkat(struct lwp *l, int fdat, const char *path, char *buf,
     size_t count, register_t *retval)
 {
+	cap_rights_t rights;
 	struct vnode *vp;
 	struct iovec aiov;
 	struct uio auio;
@@ -3179,7 +3236,8 @@ do_sys_readlinkat(struct lwp *l, int fdat, const char *path, char *buf,
 		return error;
 	}
 	NDINIT(&nd, LOOKUP, NOFOLLOW | LOCKLEAF | TRYEMULROOT, pb);
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0) {
+	if ((error = fd_nameiat(l, fdat,
+	    cap_rights_init(&rights, CAP_READLINKAT), &nd)) != 0) {
 		pathbuf_destroy(pb);
 		return error;
 	}
@@ -3254,12 +3312,14 @@ sys_fchflags(struct lwp *l, const struct sys_fchflags_args *uap, register_t *ret
 		syscallarg(int) fd;
 		syscallarg(u_long) flags;
 	} */
+	cap_rights_t rights;
 	struct vnode *vp;
 	file_t *fp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FCHFLAGS), &fp)) != 0)
 		return (error);
 	vp = fp->f_vnode;
 	error = change_flags(vp, SCARG(uap, flags), l);
@@ -3327,6 +3387,7 @@ sys_chmod(struct lwp *l, const struct sys_chmod_args *uap, register_t *retval)
 int
 do_sys_chmodat(struct lwp *l, int fdat, const char *path, int mode, int flags)
 {
+	cap_rights_t rights;
 	int error;
 	struct vnode *vp;
 	namei_simple_flags_t ns_flag;
@@ -3336,7 +3397,8 @@ do_sys_chmodat(struct lwp *l, int fdat, const char *path, int mode, int flags)
 	else
 		ns_flag = NSM_FOLLOW_TRYEMULROOT;
 
-	error = fd_nameiat_simple_user(l, fdat, path, ns_flag, &vp);
+	error = fd_nameiat_simple_user(l, fdat,
+	    cap_rights_init(&rights, CAP_FCHMODAT), path, ns_flag, &vp);
 	if (error != 0)
 		return error;
 
@@ -3358,11 +3420,13 @@ sys_fchmod(struct lwp *l, const struct sys_fchmod_args *uap, register_t *retval)
 		syscallarg(int) fd;
 		syscallarg(int) mode;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FCHMOD), &fp)) != 0)
 		return (error);
 	error = change_mode(fp->f_vnode, SCARG(uap, mode), l);
 	fd_putfile(SCARG(uap, fd));
@@ -3446,6 +3510,7 @@ int
 do_sys_chownat(struct lwp *l, int fdat, const char *path, uid_t uid,
    gid_t gid, int flags)
 {
+	cap_rights_t rights;
 	int error;
 	struct vnode *vp;
 	namei_simple_flags_t ns_flag;
@@ -3455,7 +3520,8 @@ do_sys_chownat(struct lwp *l, int fdat, const char *path, uid_t uid,
 	else
 		ns_flag = NSM_FOLLOW_TRYEMULROOT;
 
-	error = fd_nameiat_simple_user(l, fdat, path, ns_flag, &vp);
+	error = fd_nameiat_simple_user(l, fdat,
+	    cap_rights_init(&rights, CAP_FCHOWNAT), path, ns_flag, &vp);
 	if (error != 0)
 		return error;
 
@@ -3505,11 +3571,13 @@ sys_fchown(struct lwp *l, const struct sys_fchown_args *uap, register_t *retval)
 		syscallarg(uid_t) uid;
 		syscallarg(gid_t) gid;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FCHOWN), &fp)) != 0)
 		return (error);
 	error = change_owner(fp->f_vnode, SCARG(uap, uid), SCARG(uap, gid),
 	    l, 0);
@@ -3546,11 +3614,13 @@ sys___posix_fchown(struct lwp *l, const struct sys___posix_fchown_args *uap, reg
 		syscallarg(uid_t) uid;
 		syscallarg(gid_t) gid;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FCHOWN), &fp)) != 0)
 		return (error);
 	error = change_owner(fp->f_vnode, SCARG(uap, uid), SCARG(uap, gid),
 	    l, 1);
@@ -3702,11 +3772,13 @@ sys___futimes50(struct lwp *l, const struct sys___futimes50_args *uap,
 		syscallarg(int) fd;
 		syscallarg(const struct timeval *) tptr;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FUTIMES), &fp)) != 0)
 		return (error);
 	error = do_sys_utimes(l, fp->f_vnode, NULL, 0, SCARG(uap, tptr),
 	    UIO_USERSPACE);
@@ -3722,11 +3794,13 @@ sys_futimens(struct lwp *l, const struct sys_futimens_args *uap,
 		syscallarg(int) fd;
 		syscallarg(const struct timespec *) tptr;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FUTIMES), &fp)) != 0)
 		return (error);
 	error = do_sys_utimensat(l, AT_FDCWD, fp->f_vnode, NULL, 0,
 	    SCARG(uap, tptr), UIO_USERSPACE);
@@ -3788,6 +3862,7 @@ int
 do_sys_utimensat(struct lwp *l, int fdat, struct vnode *vp,
     const char *path, int flag, const struct timespec *tptr, enum uio_seg seg)
 {
+	cap_rights_t rights;
 	struct vattr vattr;
 	int error, dorele = 0;
 	namei_simple_flags_t sflags;
@@ -3834,7 +3909,8 @@ do_sys_utimensat(struct lwp *l, int fdat, struct vnode *vp,
 
 	if (vp == NULL) {
 		/* note: SEG describes TPTR, not PATH; PATH is always user */
-		error = fd_nameiat_simple_user(l, fdat, path, sflags, &vp);
+		error = fd_nameiat_simple_user(l, fdat,
+		    cap_rights_init(&rights, CAP_FUTIMESAT), path, sflags, &vp);
 		if (error != 0)
 			return error;
 		dorele = 1;
@@ -3949,6 +4025,7 @@ sys_ftruncate(struct lwp *l, const struct sys_ftruncate_args *uap, register_t *r
 		syscallarg(int) pad;
 		syscallarg(off_t) length;
 	} */
+	cap_rights_t rights;
 	struct vattr vattr;
 	struct vnode *vp;
 	file_t *fp;
@@ -3958,7 +4035,8 @@ sys_ftruncate(struct lwp *l, const struct sys_ftruncate_args *uap, register_t *r
 		return EINVAL;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FTRUNCATE), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FWRITE) == 0) {
 		error = EINVAL;
@@ -3989,12 +4067,14 @@ sys_fsync(struct lwp *l, const struct sys_fsync_args *uap, register_t *retval)
 	/* {
 		syscallarg(int) fd;
 	} */
+	cap_rights_t rights;
 	struct vnode *vp;
 	file_t *fp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSYNC), &fp)) != 0)
 		return (error);
 	vp = fp->f_vnode;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
@@ -4021,6 +4101,7 @@ sys_fsync_range(struct lwp *l, const struct sys_fsync_range_args *uap, register_
 		syscallarg(off_t) start;
 		syscallarg(off_t) length;
 	} */
+	cap_rights_t rights;
 	struct vnode *vp;
 	file_t *fp;
 	int flags, nflags;
@@ -4028,7 +4109,8 @@ sys_fsync_range(struct lwp *l, const struct sys_fsync_range_args *uap, register_
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSYNC), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FWRITE) == 0) {
@@ -4083,12 +4165,14 @@ sys_fdatasync(struct lwp *l, const struct sys_fdatasync_args *uap, register_t *r
 	/* {
 		syscallarg(int) fd;
 	} */
+	cap_rights_t rights;
 	struct vnode *vp;
 	file_t *fp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSYNC), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(SCARG(uap, fd));
@@ -4171,6 +4255,7 @@ static int
 do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
     const char *to, enum uio_seg seg, int retain)
 {
+	cap_rights_t rights;
 	struct pathbuf *fpb, *tpb;
 	struct nameidata fnd, tnd;
 	struct vnode *fdvp, *fvp;
@@ -4198,7 +4283,8 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	 * insane, so for the time being we need to leave it like this.
 	 */
 	NDINIT(&fnd, DELETE, (LOCKPARENT | TRYEMULROOT), fpb);
-	if ((error = fd_nameiat(l, fromfd, &fnd)) != 0)
+	if ((error = fd_nameiat(l, fromfd,
+	    cap_rights_init(&rights, CAP_RENAMEAT_SOURCE), &fnd)) != 0)
 		goto out2;
 
 	/*
@@ -4253,7 +4339,8 @@ do_sys_renameat(struct lwp *l, int fromfd, const char *from, int tofd,
 	    (LOCKPARENT | NOCACHE | TRYEMULROOT |
 		((fvp->v_type == VDIR)? CREATEDIR : 0)),
 	    tpb);
-	if ((error = fd_nameiat(l, tofd, &tnd)) != 0)
+	if ((error = fd_nameiat(l, tofd,
+	    cap_rights_init(&rights, CAP_RENAMEAT_TARGET), &tnd)) != 0)
 		goto abort0;
 
 	/*
@@ -4539,6 +4626,7 @@ static int
 do_sys_mkdirat(struct lwp *l, int fdat, const char *path, mode_t mode,
     enum uio_seg seg)
 {
+	cap_rights_t rights;
 	struct proc *p = curlwp->l_proc;
 	struct vnode *vp;
 	struct vattr vattr;
@@ -4556,7 +4644,8 @@ do_sys_mkdirat(struct lwp *l, int fdat, const char *path, mode_t mode,
 
 	NDINIT(&nd, CREATE, LOCKPARENT | CREATEDIR | TRYEMULROOT, pb);
 
-	if ((error = fd_nameiat(l, fdat, &nd)) != 0) {
+	if ((error = fd_nameiat(l, fdat, cap_rights_init(&rights, CAP_MKDIRAT),
+	    &nd)) != 0) {
 		pathbuf_destroy(pb);
 		return (error);
 	}
@@ -4605,11 +4694,13 @@ sys___getdents30(struct lwp *l, const struct sys___getdents30_args *uap, registe
 		syscallarg(char *) buf;
 		syscallarg(size_t) count;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int error, done;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -4708,6 +4799,7 @@ sys_posix_fallocate(struct lwp *l, const struct sys_posix_fallocate_args *uap,
 		syscallarg(off_t) pos;
 		syscallarg(off_t) len;
 	} */
+	cap_rights_t rights;
 	int fd;
 	off_t pos, len;
 	struct file *fp;
@@ -4723,7 +4815,8 @@ sys_posix_fallocate(struct lwp *l, const struct sys_posix_fallocate_args *uap,
 		return 0;
 	}
 	
-	error = fd_getvnode(fd, &fp);
+	error = fd_getvnode(fd, cap_rights_init(&rights, CAP_POSIX_FALLOCATE),
+	    &fp);
 	if (error) {
 		*retval = error;
 		return 0;
@@ -4762,6 +4855,7 @@ sys_fdiscard(struct lwp *l, const struct sys_fdiscard_args *uap,
 		syscallarg(off_t) pos;
 		syscallarg(off_t) len;
 	} */
+	cap_rights_t rights;
 	int fd;
 	off_t pos, len;
 	struct file *fp;
@@ -4776,7 +4870,7 @@ sys_fdiscard(struct lwp *l, const struct sys_fdiscard_args *uap,
 		return EINVAL;
 	}
 	
-	error = fd_getvnode(fd, &fp);
+	error = fd_getvnode(fd, cap_rights_init(&rights, CAP_FDISCARD), &fp);
 	if (error) {
 		return error;
 	}

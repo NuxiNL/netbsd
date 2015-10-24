@@ -54,6 +54,7 @@ __KERNEL_RCSID(0, "$NetBSD: sunos_misc.c,v 1.169 2014/09/05 09:21:55 matt Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/dirent.h>
@@ -369,7 +370,8 @@ sunos_sys_getdents(struct lwp *l, const struct sunos_sys_getdents_args *uap, reg
 	off_t *cookiebuf, *cookie;
 	int ncookies;
 
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -528,13 +530,15 @@ sunos_sys_mctl(struct lwp *l, const struct sunos_sys_mctl_args *uap, register_t 
 int
 sunos_sys_setsockopt(struct lwp *l, const struct sunos_sys_setsockopt_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct sockopt sopt;
 	struct socket *so;
 	int name = SCARG(uap, name);
 	int error;
 
 	/* fd_getsock() will use the descriptor for us */
-	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
+	if ((error = fd_getsock(SCARG(uap, s),
+	    cap_rights_init(&rights, CAP_SETSOCKOPT), &so)) != 0)
 		return (error);
 #define	SO_DONTLINGER (~SO_LINGER)
 	if (name == SO_DONTLINGER) {
@@ -812,7 +816,8 @@ sunos_sys_fstatfs(struct lwp *l, const struct sunos_sys_fstatfs_args *uap, regis
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;

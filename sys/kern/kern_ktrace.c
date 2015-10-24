@@ -65,6 +65,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_ktrace.c,v 1.166 2014/11/21 09:40:10 ozaki-r Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/kernel.h>
@@ -1155,12 +1156,14 @@ sys_fktrace(struct lwp *l, const struct sys_fktrace_args *uap, register_t *retva
 		syscallarg(int) facs;
 		syscallarg(int) pid;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int error, fd;
 
 	fd = SCARG(uap, fd);
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_WRITE),
+	    &fp)) != 0)
+		return error;
 	if ((fp->f_flag & FWRITE) == 0)
 		error = EBADF;
 	else

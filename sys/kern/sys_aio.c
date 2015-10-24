@@ -39,6 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_aio.c,v 1.40 2014/09/05 09:20:59 matt Exp $");
 #endif
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/condvar.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -357,6 +358,7 @@ aio_worker(void *arg)
 static void
 aio_process(struct aio_job *a_job)
 {
+	cap_rights_t rights;
 	struct proc *p = curlwp->l_proc;
 	struct aiocb *aiocbp = &a_job->aiocbp;
 	struct file *fp;
@@ -374,12 +376,6 @@ aio_process(struct aio_job *a_job)
 			goto done;
 		}
 
-		fp = fd_getfile(fd);
-		if (fp == NULL) {
-			error = EBADF;
-			goto done;
-		}
-
 		aiov.iov_base = (void *)(uintptr_t)aiocbp->aio_buf;
 		aiov.iov_len = aiocbp->aio_nbytes;
 		auio.uio_iov = &aiov;
@@ -392,6 +388,10 @@ aio_process(struct aio_job *a_job)
 			 * Perform a Read operation
 			 */
 			KASSERT((a_job->aio_op & AIO_WRITE) == 0);
+
+			if ((error = fd_getfile(fd,
+			    cap_rights_init(&rights, CAP_READ), &fp)) != 0)
+				goto done;
 
 			if ((fp->f_flag & FREAD) == 0) {
 				fd_putfile(fd);
@@ -406,6 +406,10 @@ aio_process(struct aio_job *a_job)
 			 * Perform a Write operation
 			 */
 			KASSERT(a_job->aio_op & AIO_WRITE);
+
+			if ((error = fd_getfile(fd,
+			    cap_rights_init(&rights, CAP_READ), &fp)) != 0)
+				goto done;
 
 			if ((fp->f_flag & FWRITE) == 0) {
 				fd_putfile(fd);
@@ -429,7 +433,8 @@ aio_process(struct aio_job *a_job)
 		 */
 		struct vnode *vp;
 
-		if ((error = fd_getvnode(fd, &fp)) != 0)
+		if ((error = fd_getvnode(fd,
+		    cap_rights_init(&rights, CAP_FSYNC), &fp)) != 0)
 			goto done; 
 
 		if ((fp->f_flag & FWRITE) == 0) {

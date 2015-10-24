@@ -93,6 +93,7 @@ __KERNEL_RCSID(0, "$NetBSD: ultrix_misc.c,v 1.122 2012/02/19 21:06:45 rmind Exp 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/dirent.h>
 #include <sys/proc.h>
@@ -332,6 +333,7 @@ ultrix_sys_mmap(struct lwp *l, const struct ultrix_sys_mmap_args *uap, register_
 int
 ultrix_sys_setsockopt(struct lwp *l, const struct ultrix_sys_setsockopt_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct sockopt sopt;
 	struct socket *so;
 	int error;
@@ -344,7 +346,8 @@ ultrix_sys_setsockopt(struct lwp *l, const struct ultrix_sys_setsockopt_args *ua
 	SCARG(&ap, valsize) = SCARG(uap, valsize);
 
 	/* fd_getsock() will use the descriptor for us */
-	if ((error = fd_getsock(SCARG(&ap, s), &so))  != 0)
+	if ((error = fd_getsock(SCARG(&ap, s),
+	    cap_rights_init(&rights, CAP_SETSOCKOPT), &so))  != 0)
 		return error;
 #define	SO_DONTLINGER (~SO_LINGER)
 	if (SCARG(&ap, name) == SO_DONTLINGER) {

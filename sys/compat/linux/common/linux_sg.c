@@ -30,6 +30,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_sg.c,v 1.13 2008/03/21 21:54:58 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -72,15 +73,17 @@ int
 linux_ioctl_sg(struct lwp *l, const struct linux_sys_ioctl_args *uap,
     register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	u_long com = SCARG(uap, com);
-	int error = 0;
+	int error;
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct linux_sg_io_hdr lreq;
 	struct scsireq req;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	ioctlf = fp->f_ops->fo_ioctl;
 

@@ -27,6 +27,7 @@
 __KERNEL_RCSID(0, "$NetBSD: filemon.c,v 1.11 2015/08/20 14:40:17 christos Exp $");
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/conf.h>
@@ -276,6 +277,7 @@ filemon_close(struct file * fp)
 static int
 filemon_ioctl(struct file * fp, u_long cmd, void *data)
 {
+	cap_rights_t rights;
 	int error = 0;
 	struct filemon *filemon;
 	struct proc *tp;
@@ -295,9 +297,11 @@ filemon_ioctl(struct file * fp, u_long cmd, void *data)
 	case FILEMON_SET_FD:
 		/* Set the output file descriptor. */
 		filemon->fm_fd = *((int *) data);
-		if ((filemon->fm_fp = fd_getfile(filemon->fm_fd)) == NULL) {
+		if ((error = fd_getfile(filemon->fm_fd,
+		    cap_rights_init(&rights, CAP_WRITE),
+		    &filemon->fm_fp)) != 0) {
 			rw_exit(&filemon->fm_mtx);
-			return EBADF;
+			return error;
 		}
 		/* Write the file header. */
 		filemon_comment(filemon);

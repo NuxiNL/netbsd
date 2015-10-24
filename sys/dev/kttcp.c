@@ -46,6 +46,7 @@ __KERNEL_RCSID(0, "$NetBSD: kttcp.c,v 1.38 2015/08/20 14:40:17 christos Exp $");
 
 #include <sys/param.h>
 #include <sys/types.h>
+#include <sys/capsicum.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -123,6 +124,7 @@ kttcpioctl(dev_t dev, u_long cmd, void *data, int flag,
 static int
 kttcp_send(struct lwp *l, struct kttcp_io_args *kio)
 {
+	cap_rights_t rights;
 	struct socket *so;
 	int error;
 	struct timeval t0, t1;
@@ -131,7 +133,8 @@ kttcp_send(struct lwp *l, struct kttcp_io_args *kio)
 	if (kio->kio_totalsize >= KTTCP_MAX_XMIT)
 		return EINVAL;
 
-	if ((error = fd_getsock(kio->kio_socket, &so)) != 0)
+	if ((error = fd_getsock(kio->kio_socket,
+	    cap_rights_init(&rights, CAP_SEND), &so)) != 0)
 		return error;
 
 	len = kio->kio_totalsize;
@@ -156,6 +159,7 @@ kttcp_send(struct lwp *l, struct kttcp_io_args *kio)
 static int
 kttcp_recv(struct lwp *l, struct kttcp_io_args *kio)
 {
+	cap_rights_t rights;
 	struct socket *so;
 	int error;
 	struct timeval t0, t1;
@@ -166,7 +170,8 @@ kttcp_recv(struct lwp *l, struct kttcp_io_args *kio)
 	if (kio->kio_totalsize > KTTCP_MAX_XMIT)
 		return EINVAL;
 
-	if ((error = fd_getsock(kio->kio_socket, &so)) != 0)
+	if ((error = fd_getsock(kio->kio_socket,
+	    cap_rights_init(&rights, CAP_RECV), &so)) != 0)
 		return error;
 	len = kio->kio_totalsize;
 	microtime(&t0);

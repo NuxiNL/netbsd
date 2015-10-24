@@ -37,6 +37,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux32_dirent.c,v 1.13 2011/10/14 09:23:29 hannken 
 
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/fstypes.h>
 #include <sys/signal.h>
 #include <sys/dirent.h>
@@ -99,6 +100,7 @@ linux32_sys_getdents(struct lwp *l, const struct linux32_sys_getdents_args *uap,
 		syscallarg(linux32_direntp_t) dent;
 		syscallarg(unsigned int) count;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *tbuf;		/* BSD-format */
@@ -116,7 +118,8 @@ linux32_sys_getdents(struct lwp *l, const struct linux32_sys_getdents_args *uap,
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

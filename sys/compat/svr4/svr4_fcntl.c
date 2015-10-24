@@ -34,6 +34,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_fcntl.c,v 1.74 2014/11/09 18:16:55 maxv Exp $")
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -215,11 +216,13 @@ svr4_to_bsd_flock64(struct svr4_flock64 *iflp, struct flock *oflp)
 static int
 fd_revoke(struct lwp *l, int fd, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	vnode_t *vp;
 	int error;
 
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_FREVOKE),
+	    &fp)) != 0)
 		return error;
 
 	vp = fp->f_vnode;
@@ -238,6 +241,7 @@ fd_revoke(struct lwp *l, int fd, register_t *retval)
 static int
 fd_truncate(struct lwp *l, int fd, struct flock *flp, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	off_t start, length;
 	vnode_t *vp;
@@ -248,8 +252,9 @@ fd_truncate(struct lwp *l, int fd, struct flock *flp, register_t *retval)
 	/*
 	 * We only support truncating the file.
 	 */
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FTRUNCATE),
+	    &fp)) != 0)
+		return error;
 
 	vp = fp->f_vnode;
 	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
@@ -318,11 +323,12 @@ svr4_sys_open(struct lwp *l, const struct svr4_sys_open_args *uap, register_t *r
 
 	if (!(SCARG(&cup, flags) & O_NOCTTY) && SESS_LEADER(l->l_proc) &&
 	    !(l->l_proc->p_lflag & PL_CONTROLT)) {
+		cap_rights_t rights;
 		file_t *fp;
-		fp = fd_getfile(*retval);
 
 		/* ignore any error, just give it a try */
-		if (fp != NULL) {
+		if (fd_getfile(*retval, cap_rights_init(&rights, CAP_IOCTL),
+		    &fp) == 0) {
 			if (fp->f_type == DTYPE_VNODE)
 				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);
 			fd_putfile(*retval);

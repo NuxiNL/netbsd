@@ -74,6 +74,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_generic.c,v 1.130 2014/09/05 09:20:59 matt Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
@@ -104,13 +105,15 @@ sys_read(struct lwp *l, const struct sys_read_args *uap, register_t *retval)
 		syscallarg(void *)	buf;
 		syscallarg(size_t)	nbyte;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
-	int fd;
+	int error, fd;
 
 	fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READ), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -186,6 +189,7 @@ int
 do_filereadv(int fd, const struct iovec *iovp, int iovcnt,
     off_t *offset, int flags, register_t *retval)
 {
+	cap_rights_t	rights;
 	struct uio	auio;
 	struct iovec	*iov, *needfree = NULL, aiov[UIO_SMALLIOV];
 	int		i, error;
@@ -197,8 +201,10 @@ do_filereadv(int fd, const struct iovec *iovp, int iovcnt,
 	if (iovcnt == 0)
 		return EINVAL;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(fd,
+	    cap_rights_init(&rights, offset == NULL ? CAP_READ : CAP_PREAD),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -306,13 +312,16 @@ sys_write(struct lwp *l, const struct sys_write_args *uap, register_t *retval)
 		syscallarg(const void *)	buf;
 		syscallarg(size_t)		nbyte;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int fd;
+	int error;
 
 	fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_WRITE),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -391,6 +400,7 @@ int
 do_filewritev(int fd, const struct iovec *iovp, int iovcnt,
     off_t *offset, int flags, register_t *retval)
 {
+	cap_rights_t	rights;
 	struct uio	auio;
 	struct iovec	*iov, *needfree = NULL, aiov[UIO_SMALLIOV];
 	int		i, error;
@@ -402,8 +412,10 @@ do_filewritev(int fd, const struct iovec *iovp, int iovcnt,
 	if (iovcnt == 0)
 		return EINVAL;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(fd,
+	    cap_rights_init(&rights, offset == NULL ? CAP_WRITE : CAP_PWRITE),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -518,6 +530,7 @@ sys_ioctl(struct lwp *l, const struct sys_ioctl_args *uap, register_t *retval)
 		syscallarg(u_long)	com;
 		syscallarg(void *)	data;
 	} */
+	cap_rights_t	rights;
 	struct file	*fp;
 	proc_t		*p;
 	u_long		com;
@@ -538,8 +551,9 @@ sys_ioctl(struct lwp *l, const struct sys_ioctl_args *uap, register_t *retval)
 	error = 0;
 	p = l->l_proc;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;

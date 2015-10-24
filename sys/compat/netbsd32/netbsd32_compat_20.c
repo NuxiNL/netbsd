@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_compat_20.c,v 1.34 2014/09/05 09:21:54 matt
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -181,6 +182,7 @@ compat_20_netbsd32_fstatfs(struct lwp *l, const struct compat_20_netbsd32_fstatf
 		syscallarg(int) fd;
 		syscallarg(netbsd32_statfsp_t) buf;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sb;
@@ -188,7 +190,8 @@ compat_20_netbsd32_fstatfs(struct lwp *l, const struct compat_20_netbsd32_fstatf
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sb = &mp->mnt_stat;

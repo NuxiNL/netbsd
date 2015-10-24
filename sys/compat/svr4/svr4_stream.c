@@ -45,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_stream.c,v 1.86 2015/05/23 15:27:55 rtr Exp $")
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
+#include <sys/capsicum.h>
 #include <sys/malloc.h>
 #include <sys/ioctl.h>
 #include <sys/tty.h>
@@ -1365,6 +1366,7 @@ svr4_stream_ioctl(file_t *fp, struct lwp *l, register_t *retval, int fd, u_long 
 int
 svr4_sys_putmsg(struct lwp *l, const struct svr4_sys_putmsg_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct sockaddr *skp;
 	file_t	*fp;
@@ -1383,8 +1385,9 @@ svr4_sys_putmsg(struct lwp *l, const struct svr4_sys_putmsg_args *uap, register_
 		 SCARG(uap, dat), SCARG(uap, flags));
 #endif /* DEBUG_SVR4 */
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_WRITE), &fp)) != 0)
+		return error;
 
 	KERNEL_LOCK(1, NULL);	/* svr4_find_socket */
 
@@ -1522,6 +1525,7 @@ svr4_sys_putmsg(struct lwp *l, const struct svr4_sys_putmsg_args *uap, register_
 int
 svr4_sys_getmsg(struct lwp *l, const struct svr4_sys_getmsg_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct svr4_strbuf dat, ctl;
 	struct svr4_strmcmd sc;
@@ -1541,8 +1545,9 @@ svr4_sys_getmsg(struct lwp *l, const struct svr4_sys_getmsg_args *uap, register_
 		 SCARG(uap, dat), 0);
 #endif /* DEBUG_SVR4 */
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READ), &fp)) != 0)
+		return error;
 
 	if (SCARG_PTR(uap, ctl) != NULL) {
 		if ((error = copyin(SCARG_PTR(uap, ctl), &ctl,

@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_file64.c,v 1.55 2013/12/27 14:17:11 njoly Exp 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/dirent.h>
@@ -253,6 +254,7 @@ linux_sys_getdents64(struct lwp *l, const struct linux_sys_getdents64_args *uap,
 		syscallarg(struct linux_dirent64 *) dent;
 		syscallarg(unsigned int) count;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *tbuf;		/* BSD-format */
@@ -270,7 +272,8 @@ linux_sys_getdents64(struct lwp *l, const struct linux_sys_getdents64_args *uap,
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

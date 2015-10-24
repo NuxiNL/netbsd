@@ -40,6 +40,7 @@ __KERNEL_RCSID(0, "$NetBSD: smb_dev.c,v 1.44 2015/08/20 14:40:19 christos Exp $"
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
 #include <sys/filedesc.h>
@@ -408,6 +409,7 @@ int
 smb_dev2share(int fd, int mode, struct smb_cred *scred,
     struct smb_share **sspp)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	struct smb_dev *sdp;
@@ -415,8 +417,9 @@ smb_dev2share(int fd, int mode, struct smb_cred *scred,
 	dev_t dev;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_READ),
+	    &fp)) != 0)
+		return error;
 
 	vp = fp->f_vnode;
 	if (fp->f_type != DTYPE_VNODE

@@ -26,6 +26,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/dirent.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -253,6 +254,7 @@ int
 rump_sunos_sys_getdents(struct lwp *l,
 	const struct rump_sunos_sys_getdents_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *buf;	/* BSD-format */
@@ -268,7 +270,8 @@ rump_sunos_sys_getdents(struct lwp *l,
 	off_t *cookiebuf, *cookie;
 	int ncookies;
 
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

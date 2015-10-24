@@ -45,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_syscalls_20.c,v 1.39 2015/07/24 13:02:52 maxv Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
@@ -171,13 +172,15 @@ compat_20_sys_fstatfs(struct lwp *l, const struct compat_20_sys_fstatfs_args *ua
 		syscallarg(int) fd;
 		syscallarg(struct statfs12 *) buf;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct mount *mp;
 	struct statvfs *sbuf;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sbuf = malloc(sizeof(*sbuf), M_TEMP, M_WAITOK);

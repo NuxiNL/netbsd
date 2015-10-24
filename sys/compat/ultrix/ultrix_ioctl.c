@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: ultrix_ioctl.c,v 1.36 2009/12/14 00:47:12 matt Exp $
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
@@ -444,11 +445,13 @@ stio2stios(struct emul_termio *t, struct emul_termios *ts)
 static int
 ultrix_do_ioctl(int fd, int cmd, void *arg, struct lwp *l)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0)
 		error = EBADF;

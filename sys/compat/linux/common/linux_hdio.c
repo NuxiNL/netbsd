@@ -40,6 +40,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_hdio.c,v 1.16 2008/03/21 21:54:58 ad Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -67,6 +68,7 @@ int
 linux_ioctl_hdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 		 register_t *retval)
 {
+	cap_rights_t rights;
 	u_long com;
 	int error, error1;
 	struct file *fp;
@@ -77,12 +79,13 @@ linux_ioctl_hdio(struct lwp *l, const struct linux_sys_ioctl_args *uap,
 	struct linux_hd_geometry hdg;
 	struct linux_hd_big_geometry hdg_big;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	com = SCARG(uap, com);
 	ioctlf = fp->f_ops->fo_ioctl;
-	retval[0] = error = 0;
+	retval[0] = 0;
 
 	switch (com) {
 	case LINUX_HDIO_OBSOLETE_IDENTITY:

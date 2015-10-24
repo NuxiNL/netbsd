@@ -32,6 +32,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_fcntl.c,v 1.35 2010/11/19 06:44:36 dholland Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -174,9 +175,11 @@ ibcs2_sys_open(struct lwp *l, const struct ibcs2_sys_open_args *uap, register_t 
 	ret = sys_open(l, &bsd_ua, retval);
 
 	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
+		cap_rights_t rights;
 		file_t *fp;
 
-		if ((fp = fd_getfile(*retval)) != NULL) {
+		if (fd_getfile(*retval, cap_rights_init(&rights, CAP_IOCTL),
+		    &fp) == 0) {
 			/* ignore any error, just give it a try */
 			if (fp->f_type == DTYPE_VNODE)
 				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);

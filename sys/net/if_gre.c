@@ -55,6 +55,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_gre.c,v 1.167 2015/08/24 22:21:26 pooka Exp $");
 #endif
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/malloc.h>
@@ -422,6 +423,7 @@ gre_upcall_remove(struct socket *so)
 static int
 gre_socreate(struct gre_softc *sc, const struct gre_soparm *sp, int *fdout)
 {
+	cap_rights_t rights;
 	int fd, rc;
 	struct socket *so;
 	struct sockaddr_big sbig;
@@ -437,7 +439,9 @@ gre_socreate(struct gre_softc *sc, const struct gre_soparm *sp, int *fdout)
 		return rc;
 	}
 
-	if ((rc = fd_getsock(fd, &so)) != 0)
+	if ((rc = fd_getsock(fd,
+	    cap_rights_init(&rights, CAP_BIND, CAP_CONNECT, CAP_SETSOCKOPT),
+	    &so)) != 0)
 		return rc;
 
 	memcpy(&sbig, &sp->sp_src, sizeof(sp->sp_src));
@@ -1010,6 +1014,7 @@ gre_fp_recvloop(void *arg)
 static bool
 gre_fp_recv(struct gre_softc *sc)
 {
+	cap_rights_t rights;
 	int fd, ofd, rc;
 	file_t *fp;
 
@@ -1032,7 +1037,8 @@ gre_fp_recv(struct gre_softc *sc)
 		/*FALLTHROUGH*/
 	case GRE_M_DELFP:
 		mutex_exit(&sc->sc_mtx);
-		if (ofd != -1 && fd_getfile(ofd) != NULL)
+		if (ofd != -1 && fd_getfile(fd, cap_rights_init(&rights),
+		    &fp) == 0)
 			fd_close(ofd);
 		mutex_enter(&sc->sc_mtx);
 		sc->sc_fd = fd;
@@ -1070,23 +1076,20 @@ gre_fp_send(struct gre_softc *sc, enum gre_msg msg, file_t *fp)
 static int
 gre_ssock(struct ifnet *ifp, struct gre_soparm *sp, int fd)
 {
-	int error = 0;
+	cap_rights_t rights;
+	int error;
 	const struct protosw *pr;
 	file_t *fp;
 	struct gre_softc *sc = ifp->if_softc;
 	struct socket *so;
 	struct sockaddr_storage dst, src;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
-	if (fp->f_type != DTYPE_SOCKET) {
-		fd_putfile(fd);
-		return ENOTSOCK;
-	}
+	if ((error = fd_getsock1(fd, cap_rights_init(&rights, CAP_SEND),
+	    &so, &fp)) != 0)
+		return error;
 
 	GRE_DPRINTF(sc, "\n");
 
-	so = fp->f_socket;
 	pr = so->so_proto;
 
 	GRE_DPRINTF(sc, "type %d, proto %d\n", pr->pr_type, pr->pr_protocol);
@@ -1163,6 +1166,7 @@ gre_clearconf(struct gre_soparm *sp, bool force)
 static int
 gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 {
+	cap_rights_t rights;
 	struct ifreq *ifr;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct if_laddrreq *lifr = (struct if_laddrreq *)data;
@@ -1170,6 +1174,7 @@ gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 	struct gre_soparm *sp;
 	int fd, error = 0, oproto, otype, s;
 	struct gre_soparm sp0;
+	file_t *fp;
 
 	ifr = data;
 
@@ -1360,7 +1365,7 @@ gre_ioctl(struct ifnet *ifp, const u_long cmd, void *data)
 		if (cmd != GRESSOCK) {
 			GRE_DPRINTF(sc, "\n");
 			/* XXX v. dodgy */
-			if (fd_getfile(fd) != NULL)
+			if (fd_getfile(fd, cap_rights_init(&rights), &fp) == 0)
 				fd_close(fd);
 		}
 

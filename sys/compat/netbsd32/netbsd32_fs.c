@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_fs.c,v 1.72 2014/10/05 20:17:28 christos Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
@@ -114,11 +115,14 @@ netbsd32_readv(struct lwp *l, const struct netbsd32_readv_args *uap, register_t 
 		syscallarg(const netbsd32_iovecp_t) iovp;
 		syscallarg(int) iovcnt;
 	} */
+	cap_rights_t rights;
 	int fd = SCARG(uap, fd);
 	file_t *fp;
+	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_READ),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -219,11 +223,14 @@ netbsd32_writev(struct lwp *l, const struct netbsd32_writev_args *uap, register_
 		syscallarg(const netbsd32_iovecp_t) iovp;
 		syscallarg(int) iovcnt;
 	} */
+	cap_rights_t rights;
 	int fd = SCARG(uap, fd);
 	file_t *fp;
+	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_WRITE),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -480,6 +487,7 @@ netbsd32___futimes50(struct lwp *l, const struct netbsd32___futimes50_args *uap,
 		syscallarg(int) fd;
 		syscallarg(const netbsd32_timevalp_t) tptr;
 	} */
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 	struct timeval tv[2], *tvp;
@@ -489,7 +497,8 @@ netbsd32___futimes50(struct lwp *l, const struct netbsd32___futimes50_args *uap,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FUTIMES), &fp)) != 0)
 		return (error);
 
 	error = do_sys_utimes(l, fp->f_vnode, NULL, 0, tvp, UIO_SYSSPACE);
@@ -507,11 +516,13 @@ netbsd32___getdents30(struct lwp *l,
 		syscallarg(netbsd32_charp) buf;
 		syscallarg(netbsd32_size_t) count;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int error, done;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -637,13 +648,15 @@ netbsd32_preadv(struct lwp *l, const struct netbsd32_preadv_args *uap, register_
 		syscallarg(int) pad;
 		syscallarg(netbsd32_off_t) offset;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_PREAD),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {
 		fd_putfile(fd);
@@ -683,13 +696,15 @@ netbsd32_pwritev(struct lwp *l, const struct netbsd32_pwritev_args *uap, registe
 		syscallarg(int) pad;
 		syscallarg(netbsd32_off_t) offset;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	off_t offset;
 	int error, fd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_PWRITE),
+	    &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & FWRITE) == 0) {
 		fd_putfile(fd);
@@ -1334,6 +1349,7 @@ netbsd32_futimens(struct lwp *l, const struct netbsd32_futimens_args *uap,
 		syscallarg(int) fd;
 		syscallarg(netbsd32_timespecp_t) tptr;
 	} */
+	cap_rights_t rights;
 	struct timespec ts[2], *tsp;
 	file_t *fp;
 	int error;
@@ -1343,7 +1359,8 @@ netbsd32_futimens(struct lwp *l, const struct netbsd32_futimens_args *uap,
 		return error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FUTIMES), &fp)) != 0)
 		return (error);
 	error = do_sys_utimensat(l, AT_FDCWD, fp->f_vnode, NULL, 0,
 	    tsp, UIO_SYSSPACE);

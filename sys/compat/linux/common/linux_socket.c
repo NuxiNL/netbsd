@@ -42,6 +42,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_socket.c,v 1.126 2015/07/24 13:02:52 maxv Exp 
 #endif /* defined(_KERNEL_OPT) */
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
@@ -346,9 +347,11 @@ linux_sys_socket(struct lwp *l, const struct linux_sys_socket_args *uap, registe
 	 * for Linux apps if the sysctl value is set to 1.
 	 */
 	if (!error && ip6_v6only && SCARG(&bsa, domain) == PF_INET6) {
+		cap_rights_t rights;
 		struct socket *so;
 
-		if (fd_getsock(*retval, &so) == 0) {
+		if (fd_getsock(*retval,
+		    cap_rights_init(&rights, CAP_SETSOCKOPT), &so) == 0) {
 			int val = 0;
 
 			/* ignore error */
@@ -994,11 +997,13 @@ linux_sys_setsockopt(struct lwp *l, const struct linux_sys_setsockopt_args *uap,
 	 * and returns EOPNOTSUPP for other levels
 	 */
 	if (SCARG(&bsa, level) != SOL_SOCKET) {
+		cap_rights_t rights;
 		struct socket *so;
 		int error, family;
 
 		/* fd_getsock() will use the descriptor for us */
-	    	if ((error = fd_getsock(SCARG(&bsa, s), &so)) != 0)
+		if ((error = fd_getsock(SCARG(&bsa, s),
+		    cap_rights_init(&rights), &so)) != 0)
 		    	return error;
 		family = so->so_proto->pr_domain->dom_family;
 		fd_putfile(SCARG(&bsa, s));
@@ -1167,6 +1172,7 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
     void *data)
 {
 	/* Not the full structure, just enough to map what we do here */
+	cap_rights_t rights;
 	struct linux_ifreq lreq;
 	file_t *fp;
 	struct ifaddr *ifa;
@@ -1186,8 +1192,9 @@ linux_getifhwaddr(struct lwp *l, register_t *retval, u_int fd,
 	 * So, we must duplicate code from sys_ioctl() and ifconf().  Ugh.
 	 */
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+	    &fp)) != 0)
+		return error;
 
 	KERNEL_LOCK(1, NULL);
 
@@ -1289,16 +1296,18 @@ linux_ioctl_socket(struct lwp *l, const struct linux_sys_ioctl_args *uap, regist
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	u_long com;
-	int error = 0, isdev = 0, dosys = 1;
+	int error, isdev = 0, dosys = 1;
 	struct sys_ioctl_args ia;
 	file_t *fp;
 	struct vnode *vp;
 	int (*ioctlf)(file_t *, u_long, void *);
 	struct ioctl_pt pt;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if (fp->f_type == DTYPE_VNODE) {
 		vp = (struct vnode *)fp->f_data;
@@ -1408,11 +1417,13 @@ linux_sys_connect(struct lwp *l, const struct linux_sys_connect_args *uap, regis
 	error = do_sys_connect(l, SCARG(uap, s), (struct sockaddr *)&sb);
 
 	if (error == EISCONN) {
+		cap_rights_t rights;
 		struct socket *so;
 		int state, prflags;
 
 		/* fd_getsock() will use the descriptor for us */
-	    	if (fd_getsock(SCARG(uap, s), &so) != 0)
+		if (fd_getsock(SCARG(uap, s),
+		    cap_rights_init(&rights, CAP_CONNECT), &so) != 0)
 		    	return EISCONN;
 
 		solock(so);
@@ -1518,10 +1529,11 @@ linux_get_sa(struct lwp *l, int s, struct sockaddr_big *sb,
 	 * This avoid triggering strict family checks in netinet/in_pcb.c et.al.
 	 */
 	if (bdom == AF_UNSPEC) {
+		cap_rights_t rights;
 		struct socket *so;
 
 		/* fd_getsock() will use the descriptor for us */
-		if ((error = fd_getsock(s, &so)) != 0)
+		if ((error = fd_getsock(s, cap_rights_init(&rights), &so)) != 0)
 			return error;
 
 		bdom = so->so_proto->pr_domain->dom_family;

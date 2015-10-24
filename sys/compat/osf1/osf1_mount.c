@@ -107,6 +107,7 @@ static int	osf1_mount_nfs(struct lwp *, const struct osf1_sys_mount_args *);
 int
 osf1_sys_fstatfs(struct lwp *l, const struct osf1_sys_fstatfs_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sp;
@@ -114,7 +115,8 @@ osf1_sys_fstatfs(struct lwp *l, const struct osf1_sys_fstatfs_args *uap, registe
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)))
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)))
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;

@@ -39,6 +39,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_machdep.c,v 1.159 2014/11/09 17:48:07 maxv Exp
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -795,6 +796,7 @@ linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, regist
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	struct sys_ioctl_args bia;
 	u_long com;
 	int error, error1;
@@ -820,8 +822,9 @@ linux_machdepioctl(struct lwp *l, const struct linux_sys_ioctl_args *uap, regist
 	SCARG(&bia, data) = SCARG(uap, data);
 	com = SCARG(uap, com);
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	switch (com) {
 #if (NWSDISPLAY > 0)

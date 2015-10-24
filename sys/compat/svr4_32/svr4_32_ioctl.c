@@ -35,6 +35,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_ioctl.c,v 1.22 2009/03/14 21:04:19 dsl Exp $
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
@@ -91,6 +92,7 @@ svr4_32_decode_cmd(netbsd32_u_long cmd, char *dir, char *c, int *num, int *argsi
 int
 svr4_32_sys_ioctl(struct lwp *l, const struct svr4_32_sys_ioctl_args *uap, register_t *retval)
 {
+	cap_rights_t	 rights;
 	file_t		*fp;
 	u_long		 cmd;
 	int error;
@@ -108,8 +110,9 @@ svr4_32_sys_ioctl(struct lwp *l, const struct svr4_32_sys_ioctl_args *uap, regis
 #endif
 	cmd = SCARG(uap, com);
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		fd_putfile(SCARG(uap, fd));

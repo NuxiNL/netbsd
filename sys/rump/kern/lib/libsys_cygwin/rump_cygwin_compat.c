@@ -26,6 +26,7 @@
  */
 
 #include <sys/param.h>
+#Include <sys/capsicum.h>
 #include <sys/dirent.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -174,6 +175,7 @@ int
 rump_cygwin_sys_getdents(struct lwp *l,
 	const struct rump_cygwin_sys_getdents_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct file *fp;
 	struct dirent *bdp;
 	struct cygwin_dirent idb;
@@ -182,7 +184,8 @@ rump_cygwin_sys_getdents(struct lwp *l,
 	size_t reclen, cygwin_reclen;
 	int error, done;
 
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	/*

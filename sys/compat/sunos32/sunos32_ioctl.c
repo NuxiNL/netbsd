@@ -64,6 +64,7 @@ __KERNEL_RCSID(0, "$NetBSD: sunos32_ioctl.c,v 1.32 2015/09/26 04:13:39 christos 
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
@@ -431,11 +432,13 @@ stio2stios(struct sunos_termio *t, struct sunos_termios *ts)
 static int
 sunos32_do_ioctl(int fd, int cmd, void *arg, struct lwp *l)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct vnode *vp;
 	int error;
 
-	if ((error = fd_getvnode(fd, &fp)) != 0)
+	if ((error = fd_getvnode(fd, cap_rights_init(&rights, CAP_IOCTL),
+	    &fp)) != 0)
 		return error;
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0) {
 		fd_putfile(fd);

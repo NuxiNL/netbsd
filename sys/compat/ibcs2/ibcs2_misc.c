@@ -99,6 +99,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_misc.c,v 1.113 2014/09/05 09:21:54 matt Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/dirent.h>
 #include <sys/proc.h>
@@ -370,6 +371,7 @@ ibcs2_sys_getdents(struct lwp *l, const struct ibcs2_sys_getdents_args *uap, reg
 		syscallarg(char *) buf;
 		syscallarg(int) nbytes;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *tbuf;	/* BSD-format */
@@ -387,7 +389,8 @@ ibcs2_sys_getdents(struct lwp *l, const struct ibcs2_sys_getdents_args *uap, reg
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -500,6 +503,7 @@ ibcs2_sys_read(struct lwp *l, const struct ibcs2_sys_read_args *uap, register_t 
 		syscallarg(char *) buf;
 		syscallarg(u_int) nbytes;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *tbuf;	/* BSD-format */
@@ -521,7 +525,8 @@ ibcs2_sys_read(struct lwp *l, const struct ibcs2_sys_read_args *uap, register_t 
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0) {
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READ), &fp)) != 0) {
 		if (error == EINVAL)
 			return sys_read(l, (const void *)uap, retval);
 		else
@@ -1211,12 +1216,14 @@ xenix_sys_rdchk(struct lwp *l, const struct xenix_sys_rdchk_args *uap, register_
 	/* {
 		syscallarg(int) fd;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	int nbytes;
 	int error;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 	error = (*fp->f_ops->fo_ioctl)(fp, FIONREAD, &nbytes);
 	fd_putfile(SCARG(uap, fd));
 

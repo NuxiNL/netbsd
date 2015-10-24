@@ -62,6 +62,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_event.c,v 1.83 2015/03/02 19:24:53 christos Exp
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -826,6 +827,7 @@ kevent1(register_t *retval, int fd,
 	const struct timespec *timeout,
 	const struct kevent_ops *keops)
 {
+	cap_rights_t rights;
 	struct kevent *kevp;
 	struct kqueue *kq;
 	struct timespec	ts;
@@ -835,9 +837,13 @@ kevent1(register_t *retval, int fd,
 	file_t *fp;
 
 	/* check that we're dealing with a kq */
-	fp = fd_getfile(fd);
-	if (fp == NULL)
-		return (EBADF);
+	cap_rights_init(&rights);
+	if (nchanges > 0)
+		cap_rights_set(&rights, CAP_KQUEUE_CHANGE);
+	if (nevents > 0)
+		cap_rights_set(&rights, CAP_KQUEUE_EVENT);
+	if ((error = fd_getfile(fd, &rights, &fp)) != 0)
+		return error;
 
 	if (fp->f_type != DTYPE_KQUEUE) {
 		fd_putfile(fd);
@@ -933,12 +939,15 @@ kqueue_register(struct kqueue *kq, struct kevent *kev)
 
 	/* search if knote already exists */
 	if (kfilter->filtops->f_isfd) {
+		cap_rights_t rights;
+
 		/* monitoring a file descriptor */
 		fd = kev->ident;
-		if ((fp = fd_getfile(fd)) == NULL) {
+		if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_EVENT),
+		    &fp)) != 0) {
 			rw_exit(&kqueue_filter_lock);
 			kmem_free(newkn, sizeof(*newkn));
-			return EBADF;
+			return error;
 		}
 		mutex_enter(&fdp->fd_lock);
 		ff = fdp->fd_dt->dt_ff[fd];

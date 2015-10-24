@@ -88,6 +88,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_select.c,v 1.39 2014/04/25 15:52:45 pooka Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/file.h>
 #include <sys/proc.h>
@@ -377,8 +378,9 @@ selcommon(register_t *retval, int nd, fd_set *u_in, fd_set *u_ou,
 static inline int
 selscan(char *bits, const int nfd, const size_t ni, register_t *retval)
 {
+	cap_rights_t rights;
 	fd_mask *ibitp, *obitp;
-	int msk, i, j, fd, n;
+	int error, msk, i, j, fd, n;
 	file_t *fp;
 
 	ibitp = (fd_mask *)(bits + ni * 0);
@@ -394,8 +396,10 @@ selscan(char *bits, const int nfd, const size_t ni, register_t *retval)
 			obits = 0;
 			while ((j = ffs(ibits)) && (fd = i + --j) < nfd) {
 				ibits &= ~(1 << j);
-				if ((fp = fd_getfile(fd)) == NULL)
-					return (EBADF);
+				if ((error = fd_getfile(fd,
+				    cap_rights_init(&rights, CAP_EVENT),
+				    &fp)) != 0)
+					return error;
 				/*
 				 * Setup an argument to selrecord(), which is
 				 * a file descriptor number.
@@ -526,6 +530,7 @@ pollcommon(register_t *retval, struct pollfd *u_fds, u_int nfds,
 static inline int
 pollscan(struct pollfd *fds, const int nfd, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	int i, n = 0, revents;
 
@@ -533,7 +538,8 @@ pollscan(struct pollfd *fds, const int nfd, register_t *retval)
 		fds->revents = 0;
 		if (fds->fd < 0) {
 			revents = 0;
-		} else if ((fp = fd_getfile(fds->fd)) == NULL) {
+		} else if (fd_getfile(fds->fd,
+		    cap_rights_init(&rights, CAP_EVENT), &fp) != 0) {
 			revents = POLLNVAL;
 		} else {
 			/*

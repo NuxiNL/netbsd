@@ -52,6 +52,11 @@ struct mq_attr {
 #include <sys/types.h>
 #include <sys/param.h>
 
+#ifndef _CAP_RIGHTS_T_DECLARED
+#define	_CAP_RIGHTS_T_DECLARED
+typedef struct cap_rights cap_rights_t;
+#endif
+
 /*
  * Flags below are used in mq_flags for internal purposes.
  * This is permitted according to POSIX.
@@ -112,7 +117,8 @@ typedef struct mq_msg {
 void	mqueue_print_list(void (*pr)(const char *, ...) __printflike(1, 2));
 int	mq_send1(mqd_t, const char *, size_t, u_int, struct timespec *);
 int	mq_recv1(mqd_t, void *, size_t, u_int *, struct timespec *, ssize_t *);
-int	mqueue_get(mqd_t mqd, int fflag, mqueue_t **mqret);
+int	mqueue_get(mqd_t mqd, const cap_rights_t *rights, int fflag,
+    mqueue_t **mqret);
 int	mq_handle_open(struct lwp *l, const char *, int, mode_t,
 	    struct mq_attr*, register_t *retval);
 

@@ -41,6 +41,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_32_misc.c,v 1.75 2014/09/05 09:21:55 matt Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/dirent.h>
 #include <sys/proc.h>
@@ -202,6 +203,7 @@ svr4_32_sys_time(struct lwp *l, const struct svr4_32_sys_time_args *uap, registe
 int
 svr4_32_sys_getdents64(struct lwp *l, const struct svr4_32_sys_getdents64_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *sbuf;	/* BSD-format */
@@ -218,7 +220,8 @@ svr4_32_sys_getdents64(struct lwp *l, const struct svr4_32_sys_getdents64_args *
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -326,6 +329,7 @@ out:
 int
 svr4_32_sys_getdents(struct lwp *l, const struct svr4_32_sys_getdents_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *sbuf;	/* BSD-format */
@@ -342,7 +346,8 @@ svr4_32_sys_getdents(struct lwp *l, const struct svr4_32_sys_getdents_args *uap,
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {

@@ -33,6 +33,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_syscalls_30.c,v 1.36 2014/10/20 11:58:01 christo
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
@@ -203,6 +204,7 @@ compat_30_sys_getdents(struct lwp *l, const struct compat_30_sys_getdents_args *
 		syscallarg(char *) buf;
 		syscallarg(size_t) count;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *tbuf;	/* BSD-format */
@@ -219,7 +221,8 @@ compat_30_sys_getdents(struct lwp *l, const struct compat_30_sys_getdents_args *
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return error;
 
 	if ((fp->f_flag & FREAD) == 0) {

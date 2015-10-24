@@ -66,6 +66,7 @@ __KERNEL_RCSID(0, "$NetBSD: uipc_sem.c,v 1.42 2014/09/05 09:20:59 matt Exp $");
 #include <sys/kernel.h>
 
 #include <sys/atomic.h>
+#include <sys/capsicum.h>
 #include <sys/proc.h>
 #include <sys/ksem.h>
 #include <sys/syscall.h>
@@ -248,14 +249,14 @@ ksem_perm(lwp_t *l, ksem_t *ks)
  * => holds a reference on the file descriptor.
  */
 static int
-ksem_get(int fd, ksem_t **ksret)
+ksem_get(int fd, const cap_rights_t *rights, ksem_t **ksret)
 {
 	ksem_t *ks;
 	file_t *fp;
+	int error;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL))
-		return EINVAL;
+	if ((error = fd_getfile(fd, rights, &fp)) != 0)
+		return error == EBADF ? EINVAL : error;
 	if (__predict_false(fp->f_type != DTYPE_SEM)) {
 		fd_putfile(fd);
 		return EINVAL;
@@ -515,11 +516,12 @@ sys__ksem_close(struct lwp *l, const struct sys__ksem_close_args *uap,
 	/* {
 		intptr_t id;
 	} */
-	int fd = (int)SCARG(uap, id);
+	cap_rights_t rights;
+	int error, fd = (int)SCARG(uap, id);
+	file_t *fp;
 
-	if (fd_getfile(fd) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, cap_rights_init(&rights), &fp)) != 0)
+		return error;
 	return fd_close(fd);
 }
 
@@ -650,10 +652,11 @@ sys__ksem_post(struct lwp *l, const struct sys__ksem_post_args *uap,
 	/* {
 		intptr_t id;
 	} */
+	cap_rights_t rights;
 	int fd = (int)SCARG(uap, id), error;
 	ksem_t *ks;
 
-	error = ksem_get(fd, &ks);
+	error = ksem_get(fd, cap_rights_init(&rights, CAP_SEM_POST), &ks);
 	if (error) {
 		return error;
 	}
@@ -675,10 +678,11 @@ out:
 int
 do_ksem_wait(lwp_t *l, intptr_t id, bool try_p, struct timespec *abstime)
 {
+	cap_rights_t rights;
 	int fd = (int)id, error, timeo;
 	ksem_t *ks;
 
-	error = ksem_get(fd, &ks);
+	error = ksem_get(fd, cap_rights_init(&rights, CAP_SEM_WAIT), &ks);
 	if (error) {
 		return error;
 	}
@@ -760,11 +764,12 @@ sys__ksem_getvalue(struct lwp *l, const struct sys__ksem_getvalue_args *uap,
 		intptr_t id;
 		unsigned int *value;
 	} */
+	cap_rights_t rights;
 	int fd = (int)SCARG(uap, id), error;
 	ksem_t *ks;
 	unsigned int val;
 
-	error = ksem_get(fd, &ks);
+	error = ksem_get(fd, cap_rights_init(&rights, CAP_SEM_GETVALUE), &ks);
 	if (error) {
 		return error;
 	}
@@ -783,10 +788,11 @@ sys__ksem_destroy(struct lwp *l, const struct sys__ksem_destroy_args *uap,
 	/* {
 		intptr_t id;
 	} */
+	cap_rights_t rights;
 	int fd = (int)SCARG(uap, id), error;
 	ksem_t *ks;
 
-	error = ksem_get(fd, &ks);
+	error = ksem_get(fd, cap_rights_init(&rights), &ks);
 	if (error) {
 		return error;
 	}

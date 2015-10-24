@@ -38,6 +38,7 @@ __KERNEL_RCSID(0, "$NetBSD: tty_ptm.c,v 1.37 2015/08/24 22:50:32 pooka Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/ioctl.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
@@ -332,10 +333,12 @@ static int
 /*ARGSUSED*/
 ptmopen(dev_t dev, int flag, int mode, struct lwp *l)
 {
+	cap_rights_t rights;
 	int error;
 	int fd;
 	dev_t ttydev;
 	struct mount *mp;
+	file_t *fp;
 
 	switch(minor(dev)) {
 	case 0:		/* /dev/ptmx */
@@ -351,10 +354,9 @@ ptmopen(dev_t dev, int flag, int mode, struct lwp *l)
 			 * a new linux module.
 			 */
 			if ((error = pty_grant_slave(l, ttydev, mp)) != 0) {
-				file_t *fp = fd_getfile(fd);
-				if (fp != NULL) {
+				if (fd_getfile(fd, cap_rights_init(&rights),
+				    &fp) == 0)
 					fd_close(fd);
-				}
 				return error;
 			}
 		}
@@ -379,6 +381,7 @@ static int
 /*ARGSUSED*/
 ptmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 {
+	cap_rights_t rights;
 	int error;
 	dev_t newdev;
 	int cfd, sfd;
@@ -414,15 +417,11 @@ ptmioctl(dev_t dev, u_long cmd, void *data, int flag, struct lwp *l)
 		return EINVAL;
 	}
 bad2:
-	fp = fd_getfile(sfd);
-	if (fp != NULL) {
+	if (fd_getfile(sfd, cap_rights_init(&rights), &fp) == 0)
 		fd_close(sfd);
-	}
  bad:
-	fp = fd_getfile(cfd);
-	if (fp != NULL) {
+	if (fd_getfile(cfd, cap_rights_init(&rights), &fp) == 0)
 		fd_close(cfd);
-	}
 	return error;
 }
 

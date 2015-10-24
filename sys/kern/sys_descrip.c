@@ -71,6 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: sys_descrip.c,v 1.30 2014/09/05 09:20:59 matt Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
@@ -105,14 +106,14 @@ sys_dup(struct lwp *l, const struct sys_dup_args *uap, register_t *retval)
 	/* {
 		syscallarg(int)	fd;
 	} */
+	cap_rights_t rights;
 	int error, newfd, oldfd;
 	file_t *fp;
 
 	oldfd = SCARG(uap, fd);
 
-	if ((fp = fd_getfile(oldfd)) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(oldfd, cap_rights_init(&rights), &fp)) != 0)
+		return error;
 	error = fd_dup(fp, 0, &newfd, false);
 	fd_putfile(oldfd);
 	*retval = newfd;
@@ -125,11 +126,12 @@ sys_dup(struct lwp *l, const struct sys_dup_args *uap, register_t *retval)
 int
 dodup(struct lwp *l, int from, int to, int flags, register_t *retval)
 {
+	cap_rights_t rights;
 	int error;
 	file_t *fp;
 
-	if ((fp = fd_getfile(from)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(from, cap_rights_init(&rights), &fp)) != 0)
+		return error;
 	mutex_enter(&fp->f_lock);
 	fp->f_count++;
 	mutex_exit(&fp->f_lock);
@@ -234,13 +236,15 @@ fcntl_forfs(int fd, file_t *fp, int cmd, void *arg)
 int
 do_fcntl_lock(int fd, int cmd, struct flock *fl)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	vnode_t *vp;
 	proc_t *p;
 	int error, flg;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return EBADF;
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FLOCK),
+	    &fp)) != 0)
+		return error;
 	if (fp->f_type != DTYPE_VNODE) {
 		fd_putfile(fd);
 		return EINVAL;
@@ -325,6 +329,7 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 		syscallarg(int)		cmd;
 		syscallarg(void *)	arg;
 	} */
+	cap_rights_t rights;
 	int fd, i, tmp, error, cmd, newmin;
 	filedesc_t *fdp;
 	file_t *fp;
@@ -341,7 +346,7 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 		if (fd < 0)
 			return EBADF;
 		while ((i = fdp->fd_lastfile) >= fd) {
-			if (fd_getfile(i) == NULL) {
+			if (fd_getfile(i, cap_rights_init(&rights), &fp) != 0) {
 				/* Another thread has updated. */
 				continue;
 			}
@@ -364,13 +369,22 @@ sys_fcntl(struct lwp *l, const struct sys_fcntl_args *uap, register_t *retval)
 			error = copyout(&fl, SCARG(uap, arg), sizeof(fl));
 		return error;
 
+	case F_DUPFD_CLOEXEC:
+	case F_DUPFD:
+	case F_GETFD:
+	case F_SETFD:
+		/* Actions that require no specific rights. */
+		cap_rights_init(&rights);
+		break;
+
 	default:
-		/* Handled below */
+		/* Actions that require CAP_FCNTL. */
+		cap_rights_init(&rights, CAP_FCNTL);
 		break;
 	}
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, &rights, &fp)) != 0)
+		return error;
 
 	if ((cmd & F_FSCTL)) {
 		error = fcntl_forfs(fd, fp, cmd, SCARG(uap, arg));
@@ -479,11 +493,13 @@ sys_close(struct lwp *l, const struct sys_close_args *uap, register_t *retval)
 	/* {
 		syscallarg(int)	fd;
 	} */
+	cap_rights_t rights;
+	file_t *fp;
 	int error;
 
-	if (fd_getfile(SCARG(uap, fd)) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(SCARG(uap, fd), cap_rights_init(&rights),
+	    &fp)) != 0)
+		return error;
 
 	error = fd_close(SCARG(uap, fd));
 	if (error == ERESTART) {
@@ -504,12 +520,13 @@ sys_close(struct lwp *l, const struct sys_close_args *uap, register_t *retval)
 int
 do_sys_fstat(int fd, struct stat *sb)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FSTAT),
+	    &fp)) != 0)
+		return error;
 	error = (*fp->f_ops->fo_stat)(fp, sb);
 	fd_putfile(fd);
 
@@ -548,15 +565,16 @@ sys_fpathconf(struct lwp *l, const struct sys_fpathconf_args *uap,
 		syscallarg(int)	fd;
 		syscallarg(int)	name;
 	} */
+	cap_rights_t rights;
 	int fd, error;
 	file_t *fp;
 
 	fd = SCARG(uap, fd);
 	error = 0;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return (EBADF);
-	}
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FPATHCONF),
+	    &fp)) != 0)
+		return error;
 	switch (fp->f_type) {
 	case DTYPE_SOCKET:
 	case DTYPE_PIPE:
@@ -597,6 +615,7 @@ sys_flock(struct lwp *l, const struct sys_flock_args *uap, register_t *retval)
 		syscallarg(int)	fd;
 		syscallarg(int)	how;
 	} */
+	cap_rights_t rights;
 	int fd, how, error;
 	file_t *fp;
 	vnode_t	*vp;
@@ -606,9 +625,9 @@ sys_flock(struct lwp *l, const struct sys_flock_args *uap, register_t *retval)
 	how = SCARG(uap, how);
 	error = 0;
 
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FLOCK),
+	    &fp)) != 0)
+		return error;
 	if (fp->f_type != DTYPE_VNODE) {
 		fd_putfile(fd);
 		return EOPNOTSUPP;
@@ -650,6 +669,7 @@ sys_flock(struct lwp *l, const struct sys_flock_args *uap, register_t *retval)
 int
 do_posix_fadvise(int fd, off_t offset, off_t len, int advice)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	vnode_t *vp;
 	off_t endoffset;
@@ -666,9 +686,9 @@ do_posix_fadvise(int fd, off_t offset, off_t len, int advice)
 	} else {
 		return EINVAL;
 	}
-	if ((fp = fd_getfile(fd)) == NULL) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_POSIX_FADVISE),
+	    &fp)) != 0)
+		return error;
 	if (fp->f_type != DTYPE_VNODE) {
 		if (fp->f_type == DTYPE_PIPE || fp->f_type == DTYPE_SOCKET) {
 			error = ESPIPE;

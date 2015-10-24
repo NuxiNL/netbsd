@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_stat.c,v 1.48 2014/09/05 09:21:54 matt Exp $")
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/file.h>
@@ -163,13 +164,15 @@ ibcs2_sys_fstatfs(struct lwp *l, const struct ibcs2_sys_fstatfs_args *uap, regis
 		syscallarg(int) len;
 		syscallarg(int) fstype;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;
@@ -215,13 +218,15 @@ ibcs2_sys_fstatvfs(struct lwp *l, const struct ibcs2_sys_fstatvfs_args *uap, reg
 		syscallarg(int) fd;
 		syscallarg(struct ibcs2_statvfs *) buf;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;

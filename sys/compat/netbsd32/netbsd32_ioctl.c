@@ -35,6 +35,7 @@ __KERNEL_RCSID(0, "$NetBSD: netbsd32_ioctl.c,v 1.82 2015/08/02 07:37:57 maxv Exp
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
@@ -904,6 +905,7 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 		syscallarg(netbsd32_u_long) com;
 		syscallarg(netbsd32_voidp) data;
 	} */
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct file *fp;
 	struct filedesc *fdp;
@@ -948,8 +950,9 @@ netbsd32_ioctl(struct lwp *l, const struct netbsd32_ioctl_args *uap, register_t 
 
 	fdp = p->p_fd;
 	fd = SCARG(uap, fd);
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+	    &fp)) != 0)
+		return error;
 	if ((fp->f_flag & (FREAD | FWRITE)) == 0) {
 		error = EBADF;
 		goto out;

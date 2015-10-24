@@ -52,6 +52,7 @@ __KERNEL_RCSID(0, "$NetBSD: uvm_mmap.c,v 1.153 2015/08/04 18:28:10 maxv Exp $");
 #include "opt_pax.h"
 
 #include <sys/types.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/resourcevar.h>
@@ -286,6 +287,7 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 		syscallarg(long) pad;
 		syscallarg(off_t) pos;
 	} */
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	vaddr_t addr;
 	off_t pos;
@@ -386,8 +388,17 @@ sys_mmap(struct lwp *l, const struct sys_mmap_args *uap, register_t *retval)
 
 	advice = UVM_ADV_NORMAL;
 	if ((flags & MAP_ANON) == 0) {
-		if ((fp = fd_getfile(fd)) == NULL)
-			return (EBADF);
+		cap_rights_init(&rights, CAP_MMAP);
+		if (prot & PROT_READ)
+			cap_rights_set(&rights, CAP_MMAP_R);
+		if ((flags & MAP_SHARED) != 0) {
+			if (prot & PROT_WRITE)
+				cap_rights_set(&rights, CAP_MMAP_W);
+		}
+		if (prot & PROT_EXEC)
+			cap_rights_set(&rights, CAP_MMAP_X);
+		if ((error = fd_getfile(fd, &rights, &fp)) != 0)
+			return error;
 
 		if (fp->f_ops->fo_mmap == NULL) {
 			error = ENODEV;

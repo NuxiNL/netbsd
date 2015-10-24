@@ -88,6 +88,7 @@ __KERNEL_RCSID(0, "$NetBSD: sunos32_misc.c,v 1.75 2014/09/05 09:21:55 matt Exp $
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/dirent.h>
@@ -598,6 +599,7 @@ sunos32_sys_getdents(struct lwp *l, const struct sunos32_sys_getdents_args *uap,
 		syscallarg(netbsd32_charp) buf;
 		syscallarg(int) nbytes;
 	} */
+	cap_rights_t rights;
 	struct dirent *bdp;
 	struct vnode *vp;
 	char *inp, *sbuf;	/* BSD-format */
@@ -614,7 +616,8 @@ sunos32_sys_getdents(struct lwp *l, const struct sunos32_sys_getdents_args *uap,
 	int ncookies;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_READDIR), &fp)) != 0)
 		return (error);
 
 	if ((fp->f_flag & FREAD) == 0) {
@@ -802,13 +805,15 @@ sunos32_sys_setsockopt(struct lwp *l, const struct sunos32_sys_setsockopt_args *
 		syscallarg(netbsd32_caddr_t) val;
 		syscallarg(int) valsize;
 	} */
+	cap_rights_t rights;
 	struct sockopt sopt;
 	struct socket *so;
 	int name = SCARG(uap, name);
 	int error;
 
 	/* fd_getsock() will use the descriptor for us */
-	if ((error = fd_getsock(SCARG(uap, s), &so)) != 0)
+	if ((error = fd_getsock(SCARG(uap, s),
+	    cap_rights_init(&rights, CAP_SETSOCKOPT), &so)) != 0)
 		return (error);
 #define	SO_DONTLINGER (~SO_LINGER)
 	if (name == SO_DONTLINGER) {
@@ -859,12 +864,14 @@ static inline int sunos32_sys_socket_common(struct lwp *, register_t *,
 static inline int
 sunos32_sys_socket_common(struct lwp *l, register_t *retval, int type)
 {
+	cap_rights_t rights;
 	struct socket *so;
 	int error, fd;
 
 	/* fd_getsock() will use the descriptor for us */
 	fd = (int)*retval;
-	if ((error = fd_getsock(fd, &so)) == 0) {
+	if ((error = fd_getsock(fd,
+	    cap_rights_init(&rights, CAP_SETSOCKOPT), &so)) == 0) {
 		if (type == SOCK_DGRAM)
 			so->so_options |= SO_BROADCAST;
 		fd_putfile(fd);
@@ -989,14 +996,15 @@ sunos32_sys_open(struct lwp *l, const struct sunos32_sys_open_args *uap, registe
 
 	/* XXXSMP unlocked */
 	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
+		cap_rights_t rights;
 		file_t *fp;
 		int fd;
 
 		fd = (int)*retval;
-		fp = fd_getfile(fd);
 
 		/* ignore any error, just give it a try */
-		if (fp != NULL) {
+		if (fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+		    &fp) == 0) {
 			if (fp->f_type == DTYPE_VNODE)
 				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);
 			fd_putfile(fd);
@@ -1108,13 +1116,15 @@ sunos32_sys_fstatfs(struct lwp *l, const struct sunos32_sys_fstatfs_args *uap, r
 		syscallarg(int) fd;
 		syscallarg(sunos32_statfsp_t) buf;
 	} */
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return (error);
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;

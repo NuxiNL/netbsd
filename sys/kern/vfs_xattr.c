@@ -72,6 +72,7 @@ __KERNEL_RCSID(0, "$NetBSD: vfs_xattr.c,v 1.33 2014/09/05 09:20:59 matt Exp $");
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
@@ -415,6 +416,7 @@ sys_extattr_set_fd(struct lwp *l, const struct sys_extattr_set_fd_args *uap, reg
 		syscallarg(const void *) data;
 		syscallarg(size_t) nbytes;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[EXTATTR_MAXNAMELEN];
@@ -425,7 +427,8 @@ sys_extattr_set_fd(struct lwp *l, const struct sys_extattr_set_fd_args *uap, reg
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_SET), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -509,6 +512,7 @@ sys_extattr_get_fd(struct lwp *l, const struct sys_extattr_get_fd_args *uap, reg
 		syscallarg(void *) data;
 		syscallarg(size_t) nbytes;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[EXTATTR_MAXNAMELEN];
@@ -519,7 +523,8 @@ sys_extattr_get_fd(struct lwp *l, const struct sys_extattr_get_fd_args *uap, reg
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_GET), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -601,6 +606,7 @@ sys_extattr_delete_fd(struct lwp *l, const struct sys_extattr_delete_fd_args *ua
 		syscallarg(int) attrnamespace;
 		syscallarg(const char *) attrname;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[EXTATTR_MAXNAMELEN];
@@ -611,7 +617,8 @@ sys_extattr_delete_fd(struct lwp *l, const struct sys_extattr_delete_fd_args *ua
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_DELETE), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -687,11 +694,13 @@ sys_extattr_list_fd(struct lwp *l, const struct sys_extattr_list_fd_args *uap, r
 		syscallarg(void *) data;
 		syscallarg(size_t) nbytes;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	int error;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_LIST), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -863,6 +872,7 @@ sys_fsetxattr(struct lwp *l, const struct sys_fsetxattr_args *uap, register_t *r
 		syscallarg(size_t) size;
 		syscallarg(int) flags;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[XATTR_NAME_MAX];
@@ -875,7 +885,8 @@ sys_fsetxattr(struct lwp *l, const struct sys_fsetxattr_args *uap, register_t *r
 	if (error)
 		goto out;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_SET), &fp);
 	if (error)
 		goto out;
 	vp = fp->f_vnode;
@@ -967,6 +978,7 @@ sys_fgetxattr(struct lwp *l, const struct sys_fgetxattr_args *uap, register_t *r
 		syscallarg(void *) value;
 		syscallarg(size_t) size;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[XATTR_NAME_MAX];
@@ -978,7 +990,8 @@ sys_fgetxattr(struct lwp *l, const struct sys_fgetxattr_args *uap, register_t *r
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_GET), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -1104,6 +1117,7 @@ sys_flistxattr(struct lwp *l, const struct sys_flistxattr_args *uap, register_t 
 		syscallarg(char *) list;
 		syscallarg(size_t) size;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char *list;
@@ -1111,7 +1125,8 @@ sys_flistxattr(struct lwp *l, const struct sys_flistxattr_args *uap, register_t 
 	register_t listsize_usr, listsize_sys;
 	int error;
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_LIST), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;
@@ -1217,6 +1232,7 @@ sys_fremovexattr(struct lwp *l, const struct sys_fremovexattr_args *uap, registe
 		syscallarg(int) fd;
 		syscallarg(const char *) name;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct vnode *vp;
 	char attrname[XATTR_NAME_MAX];
@@ -1228,7 +1244,8 @@ sys_fremovexattr(struct lwp *l, const struct sys_fremovexattr_args *uap, registe
 	if (error)
 		return (error);
 
-	error = fd_getvnode(SCARG(uap, fd), &fp);
+	error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_EXTATTR_DELETE), &fp);
 	if (error)
 		return (error);
 	vp = fp->f_vnode;

@@ -45,6 +45,7 @@ __KERNEL_RCSID(0, "$NetBSD: fdesc_vnops.c,v 1.126 2015/04/20 23:03:08 riastradh 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/kernel.h>	/* boottime */
@@ -337,12 +338,14 @@ fdesc_open(void *v)
 static int
 fdesc_attr(int fd, struct vattr *vap, kauth_cred_t cred)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct stat stb;
 	int error;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights, CAP_FSTAT),
+	    &fp)) != 0)
+		return error;
 
 	switch (fp->f_type) {
 	case DTYPE_VNODE:
@@ -487,8 +490,10 @@ fdesc_setattr(void *v)
 		struct vattr *a_vap;
 		kauth_cred_t a_cred;
 	} */ *ap = v;
+	cap_rights_t rights;
 	file_t *fp;
 	unsigned fd;
+	int error;
 
 	/*
 	 * Can't mess with the root vnode
@@ -505,8 +510,8 @@ fdesc_setattr(void *v)
 	}
 
 	fd = VTOFDESC(ap->a_vp)->fd_fd;
-	if ((fp = fd_getfile(fd)) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(fd, cap_rights_init(&rights), &fp)) != 0)
+		return error;
 
 	/*
 	 * XXX: Can't reasonably set the attr's on any types currently.
@@ -809,6 +814,7 @@ fdesc_kqfilter(void *v)
 		struct vnode *a_vp;
 		struct knote *a_kn;
 	} */ *ap = v;
+	cap_rights_t rights;
 	int error, fd;
 	file_t *fp;
 
@@ -820,7 +826,8 @@ fdesc_kqfilter(void *v)
 	case Fdesc:
 		/* just invoke kqfilter for the underlying descriptor */
 		fd = VTOFDESC(ap->a_vp)->fd_fd;
-		if ((fp = fd_getfile(fd)) == NULL)
+		if (fd_getfile(fd, cap_rights_init(&rights, CAP_EVENT),
+		    &fp) != 0)
 			return (1);
 		error = (*fp->f_ops->fo_kqfilter)(fp, ap->a_kn);
 		fd_putfile(fd);

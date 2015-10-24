@@ -35,6 +35,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_filio.c,v 1.24 2014/11/09 18:16:55 maxv Exp $")
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/ioctl.h>
@@ -60,6 +61,7 @@ __KERNEL_RCSID(0, "$NetBSD: svr4_filio.c,v 1.24 2014/11/09 18:16:55 maxv Exp $")
 int
 svr4_fil_ioctl(file_t *fp, struct lwp *l, register_t *retval, int fd, u_long cmd, void *data)
 {
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	int error;
 	int num;
@@ -68,10 +70,18 @@ svr4_fil_ioctl(file_t *fp, struct lwp *l, register_t *retval, int fd, u_long cmd
 	int (*ctl)(file_t *, u_long,  void *) = fp->f_ops->fo_ioctl;
 
 	*retval = 0;
-	error = 0;
 
-	if ((fp = fd_getfile(fd)) == NULL)
-                return EBADF;
+	switch (cmd) {
+	case SVR4_FIOCLEX:
+	case SVR4_FIONCLEX:
+		cap_rights_init(&rights);
+		break;
+	default:
+		cap_rights_init(&rights, CAP_IOCTL);
+		break;
+	}
+	if ((error = fd_getfile(fd, &rights, &fp)) != 0)
+		return error;
 	ff = fdp->fd_dt->dt_ff[fd];
 	switch (cmd) {
 	case SVR4_FIOCLEX:

@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: ibcs2_ioctl.c,v 1.45 2008/06/24 10:03:17 gmcgarry Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/dirent.h>
 #include <sys/proc.h>
@@ -330,6 +331,7 @@ ibcs2_sys_ioctl(struct lwp *l, const struct ibcs2_sys_ioctl_args *uap, register_
 		syscallarg(int) cmd;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	struct proc *p = l->l_proc;
 	struct file *fp;
 	int (*ctl)(struct file *, u_long, void *);
@@ -381,10 +383,11 @@ ibcs2_sys_ioctl(struct lwp *l, const struct ibcs2_sys_ioctl_args *uap, register_
 		break;
 	}
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL) {
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0) {
 		DPRINTF(("ibcs2_ioctl(%d): bad fd %d ", p->p_pid,
 			 SCARG(uap, fd)));
-		return EBADF;
+		return error;
 	}
 
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0) {
@@ -537,15 +540,17 @@ ibcs2_sys_gtty(struct lwp *l, const struct ibcs2_sys_gtty_args *uap, register_t 
 		syscallarg(int) fd;
 		syscallarg(struct sgttyb *) tb;
 	} */
+	cap_rights_t rights;
 	struct file *fp;
 	struct sgttyb tb;
 	struct ibcs2_sgttyb itb;
 	int error;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL) {
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0) {
 		DPRINTF(("ibcs2_sys_gtty(%d): bad fd %d ", curproc->p_pid,
 			 SCARG(uap, fd)));
-		return EBADF;
+		return error;
 	}
 	if ((fp->f_flag & (FREAD|FWRITE)) == 0) {
 		DPRINTF(("ibcs2_sys_gtty(%d): bad fp flag ", curproc->p_pid));

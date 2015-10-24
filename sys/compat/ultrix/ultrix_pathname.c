@@ -63,6 +63,7 @@ __KERNEL_RCSID(0, "$NetBSD: ultrix_pathname.c,v 1.39 2014/09/05 09:21:55 matt Ex
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/namei.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -173,14 +174,15 @@ ultrix_sys_open(struct lwp *l, const struct ultrix_sys_open_args *uap, register_
 
 	/* XXXSMP */
 	if (!ret && !noctty && SESS_LEADER(p) && !(p->p_lflag & PL_CONTROLT)) {
+		cap_rights_t rights;
 		file_t *fp;
 		int fd;
 
 		fd = (int)*retval;
-		fp = fd_getfile(fd);
 
 		/* ignore any error, just give it a try */
-		if (fp != NULL) {
+		if (fd_getfile(fd, cap_rights_init(&rights, CAP_IOCTL),
+		    &fp) == 0) {
 			if (fp->f_type == DTYPE_VNODE)
 				(fp->f_ops->fo_ioctl)(fp, TIOCSCTTY, NULL);
 			fd_putfile(fd);
@@ -256,13 +258,15 @@ ultrix_sys_statfs(struct lwp *l, const struct ultrix_sys_statfs_args *uap, regis
 int
 ultrix_sys_fstatfs(struct lwp *l, const struct ultrix_sys_fstatfs_args *uap, register_t *retval)
 {
+	cap_rights_t rights;
 	file_t *fp;
 	struct mount *mp;
 	struct statvfs *sp;
 	int error;
 
 	/* fd_getvnode() will use the descriptor for us */
-	if ((error = fd_getvnode(SCARG(uap, fd), &fp)) != 0)
+	if ((error = fd_getvnode(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_FSTATFS), &fp)) != 0)
 		return error;
 	mp = fp->f_vnode->v_mount;
 	sp = &mp->mnt_stat;

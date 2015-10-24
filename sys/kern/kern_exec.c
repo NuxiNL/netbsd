@@ -71,6 +71,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_exec.c,v 1.421 2015/10/22 11:48:02 maxv Exp $")
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -1986,6 +1987,7 @@ spawn_exec_data_release(struct spawn_exec_data *data)
 static void
 spawn_return(void *arg)
 {
+	cap_rights_t rights;
 	struct spawn_exec_data *spawn_data = arg;
 	struct lwp *l = curlwp;
 	int error, newfd;
@@ -1996,6 +1998,7 @@ spawn_return(void *arg)
 	register_t retval;
 	bool have_reflock;
 	bool parent_is_waiting = true;
+	file_t *fp;
 
 	/*
 	 * Check if we can release parent early.
@@ -2027,7 +2030,8 @@ spawn_return(void *arg)
 			fae = &spawn_data->sed_actions->fae[i];
 			switch (fae->fae_action) {
 			case FAE_OPEN:
-				if (fd_getfile(fae->fae_fildes) != NULL) {
+				if (fd_getfile(fae->fae_fildes,
+				    cap_rights_init(&rights), &fp) == 0) {
 					error = fd_close(fae->fae_fildes);
 					if (error)
 						break;
@@ -2039,7 +2043,8 @@ spawn_return(void *arg)
 				if (newfd != fae->fae_fildes) {
 					error = dodup(l, newfd,
 					    fae->fae_fildes, 0, &retval);
-					if (fd_getfile(newfd) != NULL)
+					if (fd_getfile(fae->fae_fildes,
+					    cap_rights_init(&rights), &fp) == 0)
 						fd_close(newfd);
 				}
 				break;
@@ -2048,10 +2053,9 @@ spawn_return(void *arg)
 				    fae->fae_newfildes, 0, &retval);
 				break;
 			case FAE_CLOSE:
-				if (fd_getfile(fae->fae_fildes) == NULL) {
-					error = EBADF;
+				if ((error = fd_getfile(fae->fae_fildes,
+				    cap_rights_init(&rights), &fp)) != 0)
 					break;
-				}
 				error = fd_close(fae->fae_fildes);
 				break;
 			}

@@ -31,6 +31,7 @@ __KERNEL_RCSID(0, "$NetBSD: linux_cdrom.c,v 1.27 2008/04/28 20:23:43 martin Exp 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
@@ -93,6 +94,7 @@ linux_ioctl_cdrom(struct lwp *l, const struct linux_sys_ioctl_args *uap, registe
 		syscallarg(u_long) com;
 		syscallarg(void *) data;
 	} */
+	cap_rights_t rights;
 	int error, idata;
 	u_long com, ncom;
 	file_t *fp;
@@ -142,12 +144,13 @@ linux_ioctl_cdrom(struct lwp *l, const struct linux_sys_ioctl_args *uap, registe
 
 	struct cd_toc_entry *entry;
 
-	if ((fp = fd_getfile(SCARG(uap, fd))) == NULL)
-		return (EBADF);
+	if ((error = fd_getfile(SCARG(uap, fd),
+	    cap_rights_init(&rights, CAP_IOCTL), &fp)) != 0)
+		return error;
 
 	com = SCARG(uap, com);
 	ioctlf = fp->f_ops->fo_ioctl;
-	retval[0] = error = 0;
+	retval[0] = 0;
 
 	u1 = malloc(sizeof(*u1), M_TEMP, M_WAITOK);
 	u2 = malloc(sizeof(*u2), M_TEMP, M_WAITOK);

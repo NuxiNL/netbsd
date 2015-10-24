@@ -100,6 +100,7 @@ __KERNEL_RCSID(0, "$NetBSD: uipc_usrreq.c,v 1.179 2015/05/02 17:18:03 rtr Exp $"
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/proc.h>
 #include <sys/filedesc.h>
 #include <sys/domain.h>
@@ -1461,6 +1462,7 @@ unp_externalize(struct mbuf *rights, struct lwp *l, int flags)
 static int
 unp_internalize(struct mbuf **controlp)
 {
+	cap_rights_t rights;
 	filedesc_t *fdescp = curlwp->l_fd;
 	struct mbuf *control = *controlp;
 	struct cmsghdr *newcm, *cm = mtod(control, struct cmsghdr *);
@@ -1494,10 +1496,15 @@ unp_internalize(struct mbuf **controlp)
 			error = EAGAIN;
 			goto out;
 		}
-		if ((fp = fd_getfile(fd)) == NULL
-		    || fp->f_type == DTYPE_KQUEUE) {
-		    	if (fp)
-		    		fd_putfile(fd);
+		if ((error = fd_getfile(fd, cap_rights_init(&rights),
+		    &fp)) != 0) {
+			atomic_dec_uint(&unp_rights);
+			nfds = i;
+			goto out;
+		}
+		if (fp->f_type == DTYPE_KQUEUE) {
+			/* kqueues cannot be passed to other processes. */
+			fd_putfile(fd);
 			atomic_dec_uint(&unp_rights);
 			nfds = i;
 			error = EBADF;

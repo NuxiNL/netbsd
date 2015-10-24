@@ -74,6 +74,7 @@ __KERNEL_RCSID(0, "$NetBSD: kern_descrip.c,v 1.229 2015/08/03 04:55:15 christos 
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/capsicum.h>
 #include <sys/filedesc.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
@@ -357,12 +358,11 @@ fd_unused(filedesc_t *fdp, unsigned fd)
  * Look up the file structure corresponding to a file descriptor
  * and return the file, holding a reference on the descriptor.
  */
-file_t *
-fd_getfile(unsigned fd)
+int
+fd_getfile(unsigned fd, const cap_rights_t *rights, file_t **fp)
 {
 	filedesc_t *fdp;
 	fdfile_t *ff;
-	file_t *fp;
 	fdtab_t *dt;
 
 	/*
@@ -372,12 +372,12 @@ fd_getfile(unsigned fd)
 	fdp = curlwp->l_fd;
 	dt = fdp->fd_dt;
 	if (__predict_false(fd >= dt->dt_nfiles)) {
-		return NULL;
+		return EBADF;
 	}
 	ff = dt->dt_ff[fd];
 	KASSERT(fd >= NDFDFILE || ff == (fdfile_t *)fdp->fd_dfdfile[fd]);
 	if (__predict_false(ff == NULL)) {
-		return NULL;
+		return EBADF;
 	}
 
 	/* Now get a reference to the descriptor. */
@@ -404,12 +404,12 @@ fd_getfile(unsigned fd)
 	 * If the file is not open or is being closed then put the
 	 * reference back.
 	 */
-	fp = ff->ff_file;
-	if (__predict_true(fp != NULL)) {
-		return fp;
+	*fp = ff->ff_file;
+	if (__predict_true(*fp != NULL)) {
+		return 0;
 	}
 	fd_putfile(fd);
-	return NULL;
+	return EBADF;
 }
 
 /*
@@ -479,15 +479,14 @@ fd_putfile(unsigned fd)
  * to a vnode.
  */
 int
-fd_getvnode(unsigned fd, file_t **fpp)
+fd_getvnode(unsigned fd, const cap_rights_t *rights, file_t **fpp)
 {
+	int error;
 	vnode_t *vp;
 	file_t *fp;
 
-	fp = fd_getfile(fd);
-	if (__predict_false(fp == NULL)) {
-		return EBADF;
-	}
+	if ((error = fd_getfile(fd, rights, &fp)) != 0)
+		return error;
 	if (__predict_false(fp->f_type != DTYPE_VNODE)) {
 		fd_putfile(fd);
 		return EINVAL;
@@ -507,25 +506,28 @@ fd_getvnode(unsigned fd, file_t **fpp)
  * to a socket.
  */
 int
-fd_getsock1(unsigned fd, struct socket **sop, file_t **fp)
+fd_getsock1(unsigned fd, const cap_rights_t *rights, struct socket **sop,
+    file_t **fpp)
 {
-	*fp = fd_getfile(fd);
-	if (__predict_false(*fp == NULL)) {
-		return EBADF;
-	}
-	if (__predict_false((*fp)->f_type != DTYPE_SOCKET)) {
+	int error;
+	file_t *fp;
+
+	if ((error = fd_getfile(fd, rights, &fp)) != 0)
+		return error;
+	if (__predict_false(fp->f_type != DTYPE_SOCKET)) {
 		fd_putfile(fd);
 		return ENOTSOCK;
 	}
-	*sop = (*fp)->f_socket;
+	*fpp = fp;
+	*sop = fp->f_socket;
 	return 0;
 }
 
 int
-fd_getsock(unsigned fd, struct socket **sop)
+fd_getsock(unsigned fd, const cap_rights_t *rights, struct socket **sop)
 {
 	file_t *fp;
-	return fd_getsock1(fd, sop, &fp);
+	return fd_getsock1(fd, rights, sop, &fp);
 }
 
 /*
@@ -743,9 +745,11 @@ fd_dup(file_t *fp, int minfd, int *newp, bool exclose)
 int
 fd_dup2(file_t *fp, unsigned newfd, int flags)
 {
+	cap_rights_t rights;
 	filedesc_t *fdp = curlwp->l_fd;
 	fdfile_t *ff;
 	fdtab_t *dt;
+	file_t *newfp;
 
 	if (flags & ~(O_CLOEXEC|O_NONBLOCK))
 		return EINVAL;
@@ -766,7 +770,7 @@ fd_dup2(file_t *fp, unsigned newfd, int flags)
 	mutex_enter(&fdp->fd_lock);
 	while (fd_isused(fdp, newfd)) {
 		mutex_exit(&fdp->fd_lock);
-		if (fd_getfile(newfd) != NULL) {
+		if (fd_getfile(newfd, cap_rights_init(&rights), &newfp) == 0) {
 			(void)fd_close(newfd);
 		} else {
 			/*
@@ -1646,14 +1650,15 @@ filedescopen(dev_t dev, int mode, int type, lwp_t *l)
 int
 fd_dupopen(int old, int *newp, int mode, int error)
 {
+	cap_rights_t rights;
 	filedesc_t *fdp;
 	fdfile_t *ff;
 	file_t *fp;
 	fdtab_t *dt;
+	int error2;
 
-	if ((fp = fd_getfile(old)) == NULL) {
-		return EBADF;
-	}
+	if ((error2 = fd_getfile(old, cap_rights_init(&rights), &fp)) != 0)
+		return error2;
 	fdp = curlwp->l_fd;
 	dt = fdp->fd_dt;
 	ff = dt->dt_ff[old];
